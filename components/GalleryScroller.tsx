@@ -1,0 +1,86 @@
+'use client';
+
+import { useEffect, useRef, useState } from 'react';
+import type { Fact } from '@/types/fact';
+import { FactSlide } from './FactSlide';
+
+interface GalleryScrollerProps {
+  slides: Fact[];
+  currentIndex: number;
+  onIndexChange: (index: number) => void;
+  prefetchDistance?: number;
+}
+
+export function GalleryScroller({
+  slides,
+  currentIndex,
+  onIndexChange,
+  prefetchDistance = 2,
+}: GalleryScrollerProps) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [visibleRange, setVisibleRange] = useState({ start: 0, end: 10 });
+
+  useEffect(() => {
+    // Update visible range based on current index
+    const start = Math.max(0, currentIndex - prefetchDistance);
+    const end = Math.min(slides.length, currentIndex + prefetchDistance + 1);
+    setVisibleRange({ start, end });
+  }, [currentIndex, slides.length, prefetchDistance]);
+
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+
+    const handleScroll = () => {
+      const scrollTop = container.scrollTop;
+      const slideHeight = window.innerHeight;
+      const newIndex = Math.round(scrollTop / slideHeight);
+      
+      if (newIndex !== currentIndex && newIndex >= 0 && newIndex < slides.length) {
+        onIndexChange(newIndex);
+      }
+    };
+
+    container.addEventListener('scroll', handleScroll, { passive: true });
+    return () => container.removeEventListener('scroll', handleScroll);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentIndex, slides.length]); // onIndexChange is stable from useCallback, don't need in deps
+
+  // Scroll to current index
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+
+    const slideHeight = window.innerHeight;
+    container.scrollTo({
+      top: currentIndex * slideHeight,
+      behavior: 'smooth',
+    });
+  }, [currentIndex]);
+
+  return (
+    <div
+      ref={containerRef}
+      className="snap-y snap-mandatory overflow-y-auto h-screen"
+      style={{ scrollSnapType: 'y mandatory' }}
+    >
+      {slides.map((fact, index) => {
+        // Only render visible slides + prefetch range
+        if (index < visibleRange.start || index > visibleRange.end) {
+          return null;
+        }
+
+        return (
+          <FactSlide
+            key={fact.id}
+            fact={fact}
+            index={index}
+            isActive={index === currentIndex}
+            priority={index === currentIndex || index === currentIndex + 1}
+          />
+        );
+      })}
+    </div>
+  );
+}
+
