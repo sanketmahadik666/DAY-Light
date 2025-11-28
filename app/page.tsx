@@ -26,6 +26,12 @@ export default function Home() {
     );
   }
 
-  return <GalleryShell initialDate={initialDate} />;
+  return (
+    <GalleryShell
+      initialDate={initialDate}
+      showDatePicker={true}
+      enableWorkflow={true}
+    />
+  );
 }
 

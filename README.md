@@ -47,6 +47,7 @@ npm start
 
 ```
 /app
+  api/facts/route.ts        # Server-side Wikimedia proxy
   layout.tsx          # Root layout with SW registration
   page.tsx           # Main gallery page
   globals.css        # Global styles
@@ -98,11 +99,28 @@ npm start
 3. Static JSON (`/static-data/YYYY-MM-DD.json`)
 4. Minimal offline fact (title only)
 
-**Images:**
-1. IndexedDB metadata
-2. SW Cache (binary)
-3. Fresh network fetch (via imageEngine)
-4. Fallback category icon
+**Images (Tiered Pipeline):**
+1. **IndexedDB metadata** → return instantly if cached
+2. **Service Worker cache** (binary)
+3. **Tier 1**: Wikimedia Commons (direct API, sanitized URLs)
+4. **Tier 2**: NASA Images / APOD (Space category)
+5. **Tier 3**: Openverse Creative Commons search
+6. **Tier 4**: StaticPhotos category fallback (`https://static.photos/{mapped}/1200x630`)
+7. **Tier 5**: Local SVG fallback icon (`/fallback/{category}.svg`)
+8. **Tier 6**: Generic default placeholder (`/fallback/default-placeholder.png`)
+
+| Category    | StaticPhotos Mapping | URL Example                          |
+|-------------|----------------------|--------------------------------------|
+| Birthdays   | `people`             | `https://static.photos/people/1200x630` |
+| Historical  | `vintage`            | `https://static.photos/vintage/1200x630` |
+| Science     | `science`            | `https://static.photos/science/1200x630` |
+| Finance     | `finance`            | `https://static.photos/finance/1200x630` |
+| Sports      | `sport`              | `https://static.photos/sport/1200x630` |
+| Festivals   | `event`              | `https://static.photos/event/1200x630` |
+| Space       | `aerial`             | `https://static.photos/aerial/1200x630` |
+| PopCulture  | `event`              | `https://static.photos/event/1200x630` |
+| Awards      | `event`              | `https://static.photos/event/1200x630` |
+| Technology  | `technology`         | `https://static.photos/technology/1200x630` |
 
 ## Image Engine
 

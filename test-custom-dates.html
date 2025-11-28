@@ -1,0 +1,294 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DAY-LIGHT Custom Dates Test</title>
+    <style>
+        body {
+            font-family: system-ui, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        .test-section {
+            background: white;
+            padding: 20px;
+            margin: 20px 0;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .test-input {
+            display: flex;
+            gap: 10px;
+            margin: 10px 0;
+        }
+        input, button {
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 14px;
+        }
+        button {
+            background: #0070f3;
+            color: white;
+            border: none;
+            cursor: pointer;
+        }
+        button:hover {
+            background: #0051cc;
+        }
+        .result {
+            margin-top: 15px;
+            padding: 15px;
+            background: #f9f9f9;
+            border-radius: 4px;
+            max-height: 400px;
+            overflow-y: auto;
+        }
+        .success { color: #22c55e; }
+        .error { color: #ef4444; }
+        .info { color: #3b82f6; }
+        pre {
+            background: #1e1e1e;
+            color: #d4d4d4;
+            padding: 15px;
+            border-radius: 4px;
+            overflow-x: auto;
+            font-size: 12px;
+        }
+        .fact-item {
+            padding: 10px;
+            margin: 5px 0;
+            background: #f0f0f0;
+            border-left: 3px solid #0070f3;
+            border-radius: 4px;
+        }
+        .fact-title {
+            font-weight: bold;
+            margin-bottom: 5px;
+        }
+        .fact-meta {
+            font-size: 12px;
+            color: #666;
+        }
+    </style>
+</head>
+<body>
+    <h1>DAY-LIGHT Custom Dates Test Suite</h1>
+    
+    <div class="test-section">
+        <h2>1. Single Date Test</h2>
+        <div class="test-input">
+            <input type="date" id="singleDate" value="2024-01-15">
+            <button onclick="testSingleDate()">Test Single Date</button>
+        </div>
+        <div id="singleResult" class="result"></div>
+    </div>
+
+    <div class="test-section">
+        <h2>2. Date Range Test</h2>
+        <div class="test-input">
+            <input type="date" id="startDate" value="2024-01-01">
+            <input type="date" id="endDate" value="2024-01-07">
+            <button onclick="testDateRange()">Test Date Range</button>
+        </div>
+        <div id="rangeResult" class="result"></div>
+    </div>
+
+    <div class="test-section">
+        <h2>3. Quick Test Dates</h2>
+        <div class="test-input">
+            <button onclick="testDate('2024-12-25')">Christmas 2024</button>
+            <button onclick="testDate('2024-02-29')">Leap Day 2024</button>
+            <button onclick="testDate('2020-01-01')">New Year 2020</button>
+            <button onclick="testDate('2023-07-04')">July 4th 2023</button>
+            <button onclick="testDate('2024-06-15')">June 15th 2024</button>
+        </div>
+        <div id="quickResult" class="result"></div>
+    </div>
+
+    <div class="test-section">
+        <h2>4. Category Test</h2>
+        <div class="test-input">
+            <input type="date" id="categoryDate" value="2024-01-15">
+            <select id="categorySelect">
+                <option value="Historical">Historical</option>
+                <option value="Birthdays">Birthdays</option>
+                <option value="Science">Science</option>
+                <option value="Sports">Sports</option>
+            </select>
+            <button onclick="testCategory()">Test Category</button>
+        </div>
+        <div id="categoryResult" class="result"></div>
+    </div>
+
+    <div class="test-section">
+        <h2>5. Validation Test</h2>
+        <div class="test-input">
+            <input type="text" id="invalidDate" placeholder="Enter invalid date" value="invalid-date">
+            <button onclick="testInvalidDate()">Test Invalid Date</button>
+        </div>
+        <div id="validationResult" class="result"></div>
+    </div>
+
+    <script>
+        const API_BASE = 'http://localhost:3000';
+
+        async function testSingleDate() {
+            const date = document.getElementById('singleDate').value;
+            const resultDiv = document.getElementById('singleResult');
+            resultDiv.innerHTML = '<p class="info">Testing date: ' + date + '...</p>';
+            
+            try {
+                const response = await fetch(`${API_BASE}/api/facts?date=${date}`);
+                const data = await response.json();
+                
+                if (data.error) {
+                    resultDiv.innerHTML = `<p class="error">Error: ${data.error}</p>`;
+                } else if (data.facts && data.facts.length > 0) {
+                    resultDiv.innerHTML = `
+                        <p class="success">✅ Success! Found ${data.facts.length} facts</p>
+                        <h3>Sample Facts:</h3>
+                        ${data.facts.slice(0, 5).map(fact => `
+                            <div class="fact-item">
+                                <div class="fact-title">${fact.title}</div>
+                                <div class="fact-meta">Year: ${fact.year || 'N/A'} | Category: ${fact.category}</div>
+                            </div>
+                        `).join('')}
+                        <pre>${JSON.stringify(data, null, 2)}</pre>
+                    `;
+                } else {
+                    resultDiv.innerHTML = `<p class="info">No facts found for this date. This is normal for some dates.</p>`;
+                }
+            } catch (error) {
+                resultDiv.innerHTML = `<p class="error">❌ Error: ${error.message}</p>`;
+            }
+        }
+
+        async function testDateRange() {
+            const startDate = document.getElementById('startDate').value;
+            const endDate = document.getElementById('endDate').value;
+            const resultDiv = document.getElementById('rangeResult');
+            resultDiv.innerHTML = '<p class="info">Testing date range: ' + startDate + ' to ' + endDate + '...</p>';
+            
+            try {
+                const dates = [];
+                const start = new Date(startDate);
+                const end = new Date(endDate);
+                const current = new Date(start);
+                
+                while (current <= end) {
+                    const dateStr = current.toISOString().split('T')[0];
+                    dates.push(dateStr);
+                    current.setDate(current.getDate() + 1);
+                }
+                
+                resultDiv.innerHTML += `<p class="info">Fetching facts for ${dates.length} dates...</p>`;
+                
+                const allFacts = [];
+                for (const date of dates.slice(0, 7)) { // Limit to 7 dates for demo
+                    try {
+                        const response = await fetch(`${API_BASE}/api/facts?date=${date}`);
+                        const data = await response.json();
+                        if (data.facts) {
+                            allFacts.push(...data.facts.map(f => ({...f, date})));
+                        }
+                    } catch (e) {
+                        console.error(`Error fetching ${date}:`, e);
+                    }
+                }
+                
+                if (allFacts.length > 0) {
+                    resultDiv.innerHTML = `
+                        <p class="success">✅ Success! Found ${allFacts.length} total facts across ${dates.length} dates</p>
+                        <h3>Sample Facts:</h3>
+                        ${allFacts.slice(0, 10).map(fact => `
+                            <div class="fact-item">
+                                <div class="fact-title">${fact.title}</div>
+                                <div class="fact-meta">Date: ${fact.date} | Year: ${fact.year || 'N/A'} | Category: ${fact.category}</div>
+                            </div>
+                        `).join('')}
+                    `;
+                } else {
+                    resultDiv.innerHTML = `<p class="info">No facts found for this date range.</p>`;
+                }
+            } catch (error) {
+                resultDiv.innerHTML = `<p class="error">❌ Error: ${error.message}</p>`;
+            }
+        }
+
+        async function testDate(date) {
+            const resultDiv = document.getElementById('quickResult');
+            resultDiv.innerHTML = '<p class="info">Testing date: ' + date + '...</p>';
+            
+            try {
+                const response = await fetch(`${API_BASE}/api/facts?date=${date}`);
+                const data = await response.json();
+                
+                if (data.error) {
+                    resultDiv.innerHTML += `<p class="error">❌ ${date}: ${data.error}</p>`;
+                } else if (data.facts && data.facts.length > 0) {
+                    resultDiv.innerHTML += `<p class="success">✅ ${date}: Found ${data.facts.length} facts - "${data.facts[0].title.substring(0, 60)}..."</p>`;
+                } else {
+                    resultDiv.innerHTML += `<p class="info">ℹ️ ${date}: No facts found</p>`;
+                }
+            } catch (error) {
+                resultDiv.innerHTML += `<p class="error">❌ ${date}: ${error.message}</p>`;
+            }
+        }
+
+        async function testCategory() {
+            const date = document.getElementById('categoryDate').value;
+            const category = document.getElementById('categorySelect').value;
+            const resultDiv = document.getElementById('categoryResult');
+            resultDiv.innerHTML = '<p class="info">Testing date: ' + date + ' with category: ' + category + '...</p>';
+            
+            try {
+                const response = await fetch(`${API_BASE}/api/facts?date=${date}&category=${category}`);
+                const data = await response.json();
+                
+                if (data.error) {
+                    resultDiv.innerHTML = `<p class="error">Error: ${data.error}</p>`;
+                } else if (data.facts && data.facts.length > 0) {
+                    resultDiv.innerHTML = `
+                        <p class="success">✅ Success! Found ${data.facts.length} facts in ${category} category</p>
+                        <h3>Sample Facts:</h3>
+                        ${data.facts.slice(0, 5).map(fact => `
+                            <div class="fact-item">
+                                <div class="fact-title">${fact.title}</div>
+                                <div class="fact-meta">Year: ${fact.year || 'N/A'} | Category: ${fact.category}</div>
+                            </div>
+                        `).join('')}
+                    `;
+                } else {
+                    resultDiv.innerHTML = `<p class="info">No facts found for ${category} category on this date.</p>`;
+                }
+            } catch (error) {
+                resultDiv.innerHTML = `<p class="error">❌ Error: ${error.message}</p>`;
+            }
+        }
+
+        async function testInvalidDate() {
+            const date = document.getElementById('invalidDate').value;
+            const resultDiv = document.getElementById('validationResult');
+            resultDiv.innerHTML = '<p class="info">Testing invalid date: ' + date + '...</p>';
+            
+            try {
+                const response = await fetch(`${API_BASE}/api/facts?date=${date}`);
+                const data = await response.json();
+                
+                if (data.error) {
+                    resultDiv.innerHTML = `<p class="success">✅ Validation working! Error: ${data.error}</p><pre>${JSON.stringify(data, null, 2)}</pre>`;
+                } else {
+                    resultDiv.innerHTML = `<p class="error">⚠️ Unexpected: Date was accepted</p><pre>${JSON.stringify(data, null, 2)}</pre>`;
+                }
+            } catch (error) {
+                resultDiv.innerHTML = `<p class="error">❌ Network Error: ${error.message}</p>`;
+            }
+        }
+    </script>
+</body>
+</html>
+

@@ -27,7 +27,15 @@ export const CategorySchema = z.enum([
 export const ImageMetadataSchema = z.object({
   url: z.string().url(),
   thumbnailUrl: z.string().url().optional(),
-  source: z.enum(['wikimedia', 'wikidata', 'nasa', 'static', 'fallback']),
+  source: z.enum([
+    'wikimedia',
+    'wikidata',
+    'nasa',
+    'openverse',
+    'staticphotos',
+    'fallback-icon',
+    'fallback-default',
+  ]),
   width: z.number().positive().optional(),
   height: z.number().positive().optional(),
   aspectRatio: z.number().positive().optional(),
@@ -100,7 +108,11 @@ export function validateImageMetadata(metadata: Partial<ImageMetadata>): {
     errors.push('Image URL is required.');
   }
 
-  if (!metadata.license && metadata.source !== 'fallback') {
+  if (
+    !metadata.license &&
+    metadata.source !== 'fallback-icon' &&
+    metadata.source !== 'fallback-default'
+  ) {
     errors.push('License information is required for non-fallback images.');
   }
 

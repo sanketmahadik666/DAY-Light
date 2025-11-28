@@ -24,6 +24,7 @@
 ```
 /app
   /api/normalize-facts/route.ts    # Fact normalization worker
+  /api/facts/route.ts              # Wikimedia feed proxy with sanitization
   globals.css                       # Global styles
   layout.tsx                        # Root layout with SW registration
   page.tsx                          # Main gallery page
@@ -84,13 +85,17 @@
    → Minimal offline fact (title only)
    ```
 
-   **Images Fallback Chain:**
-   ```
-   IndexedDB metadata
-   → SW Cache (binary)
-   → Fresh network fetch (via imageEngine)
-   → Fallback category icon (ALWAYS available)
-   ```
+  **Images Fallback Chain (Tiered):**
+  ```
+  IndexedDB metadata
+  → SW Cache (binary)
+  → Tier 1: Wikimedia Commons (direct API)
+  → Tier 2: NASA Images/APOD (Space only)
+  → Tier 3: Openverse Creative Commons search
+  → Tier 4: StaticPhotos category fallback (https://static.photos/{mapped}/1200x630)
+  → Tier 5: Local SVG fallback icon (/fallback/{category}.svg)
+  → Tier 6: Generic default placeholder (/fallback/default-placeholder.png)
+  ```
 
 3. **Rate Limit Protection**
    - Detect 429, 503 status codes

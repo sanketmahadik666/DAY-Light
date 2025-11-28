@@ -37,10 +37,38 @@ async function normalizeFacts(
   category?: string
 ): Promise<Fact[]> {
   try {
+    // Sanitize facts before sending to avoid cyclic objects or functions
+    const sanitized = facts.map(f => ({
+      id: f.id,
+      title: f.title,
+      description: f.description,
+      name: f.name,
+      date: f.date,
+      category: f.category,
+      year: f.year,
+      source: f.source,
+      sourceUrl: f.sourceUrl,
+      imageUrl: f.imageUrl,
+      // imageMetadata is optional and must be plain data
+      imageMetadata: f.imageMetadata ? {
+        url: f.imageMetadata.url,
+        thumbnailUrl: f.imageMetadata.thumbnailUrl,
+        source: f.imageMetadata.source,
+        width: f.imageMetadata.width,
+        height: f.imageMetadata.height,
+        aspectRatio: f.imageMetadata.aspectRatio,
+        license: f.imageMetadata.license,
+        alt: f.imageMetadata.alt,
+        cachedAt: f.imageMetadata.cachedAt,
+        size: f.imageMetadata.size,
+        mimeType: f.imageMetadata.mimeType,
+      } : undefined,
+    }));
+
     const response = await fetch('/api/normalize-facts', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ facts, date, category }),
+      body: JSON.stringify({ facts: sanitized, date, category }),
       signal: AbortSignal.timeout(2000), // 2s timeout
     });
 
