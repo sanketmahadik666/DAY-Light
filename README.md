@@ -1,125 +1,136 @@
+# DAY-LIGHT v3.0-final
 
-# DAY-LIGHT
-
-**A date-based global events explorer inspired by the Marathi phrase "दिनविशेष (Dinvishesh)"**
-
-**DAY-LIGHT** is a lightweight, client-side Next.js application that displays interesting facts, historical events, global holidays, space highlights, and notable birthdays or deaths for any selected date. The project is designed to start small but is planned with extensibility for future growth.
-
----
-
-## Overview
-
-**DAY-LIGHT** allows users to pick a date and instantly view curated information about what happened around the world on the same day across history. It relies entirely on public APIs and performs all operations on the client side. No backend or server is required for the initial version.
-
-This project is ideal for learning, exploration, and building a daily knowledge experience similar to "On This Day" platforms but with more features and flexible filtering.
-
----
+A cinematic, offline-capable, date-based fact gallery with reliable caching, strong fallback layers, and smooth UX across all devices.
 
 ## Features
 
-* Date picker to select any day of the year
-* Fetch historical events, births, and deaths
-* Fetch global holidays for the selected date
-* Display astronomy or space facts for the date
-* Show fun facts and media from public sources
-* Filtering by:
-  * Events, Births, Deaths
-  * Holidays
-  * Space-related highlights
+- 🎨 **Cinematic Gallery UI**: Full-viewport slides with snap-scroll and parallax
+- 📱 **Offline-First**: IndexedDB + Service Worker caching with multi-layer fallbacks
+- 🖼️ **Progressive Image Loading**: LQIP → thumbnail → hi-res with instant fallbacks
+- ⚡ **Performance Optimized**: LCP < 2.5s, smooth scrolling, zero jank
+- ♿ **Accessible**: WCAG AA compliant with reduced-motion support
+- 🎯 **Smart Image Engine**: Multi-source image fetching with intelligent scoring
 
----
+## Tech Stack
 
-## Public APIs Used
+- **Next.js 14** - React framework with App Router
+- **TypeScript** - Type safety
+- **Tailwind CSS** - Styling
+- **Framer Motion** - Animations
+- **IndexedDB** - Client-side caching (via idb)
+- **Service Worker** - Offline support and image caching
 
-### Wikipedia / Wikidata API
+## Getting Started
 
-Primary source for: historical events, births, deaths.
-API: `https://en.wikipedia.org/api/rest_v1/feed/onthisday/all/{month}/{day}`
+### Installation
 
-### Calendarific API
+```bash
+npm install
+```
 
-Used for country-specific holiday information.
-`https://calendarific.com/`
+### Development
 
-### NASA APIs
+```bash
+npm run dev
+```
 
-Provides astronomy picture of the day and other date-based space content.
-`https://api.nasa.gov/planetary/apod?date=YYYY-MM-DD`
+Open [http://localhost:3000](http://localhost:3000) in your browser.
 
-### Numbers API
+### Build
 
-Provides interesting trivia and date facts.
-`http://numbersapi.com/{month}/{day}/date`
+```bash
+npm run build
+npm start
+```
 
----
+## Project Structure
 
-## Project Goals
+```
+/app
+  layout.tsx          # Root layout with SW registration
+  page.tsx           # Main gallery page
+  globals.css        # Global styles
 
-The main goal of **DAY-LIGHT** is to create an open, simple, and user-friendly platform that displays meaningful and accurate historical information tied to any given date. Inspired by the culturally rich tradition of "Dinvishesh", **DAY-LIGHT** aims to build a modern digital version of date-based knowledge discovery.
+/components
+  GalleryShell.tsx   # Root gallery wrapper, gesture handling
+  GalleryScroller.tsx # Scroll container with virtualization
+  FactSlide.tsx      # Individual slide component
+  ImageLayer.tsx     # Progressive image loading
+  FactOverlay.tsx    # Text overlay with expand/collapse
+  SWRegister.tsx     # Service Worker registration
 
-The architecture is intentionally kept simple to allow future modular expansion without major rewrites.
+/hooks
+  useFacts.ts        # Multi-layer fact loading (IDB → SW → Static → API)
+  useImageForFact.ts # Progressive image loading with fallbacks
 
----
+/lib
+  indexedCache.ts    # IndexedDB utilities with LRU/TTL
+  imageEngine.ts     # Image search, scoring, selection
+  serviceWorker.ts   # SW registration and messaging
+  storage.ts         # localStorage and cookies
+  validators.ts      # Zod schemas and validation
 
-## Development Roadmap
+/types
+  fact.ts            # TypeScript type definitions
 
-### Initial Plan
+/utils
+  helpers.ts         # Text helpers, date formatting, slugs
+  math.ts            # Parallax and animation calculations
+```
 
-* Next.js setup
-* Date selection
-* Fetch data from Wikipedia, NASA, and Numbers API
-* Show events, births, deaths, and a daily space highlight
-* Simple UI with cards and filters
+## Caching Strategy
 
-### Filtering and UI Enhancements
+### IndexedDB
+- **Facts**: 24-hour TTL, keyed by date
+- **Images**: 30-day TTL, LRU eviction (max 300 entries)
+- **Meta**: Random pool, sync status, version
 
-* Add filtering by categories and regions
-* Add timeline layout for events
+### Service Worker
+- **dl-static-v1**: Static assets and fallback icons
+- **dl-json-v1**: JSON fact data
+- **dl-images-v1**: Image binaries (max 120, LRU pruning)
 
-### AI Integrations
+### Fallback Chain
 
-* Summaries of the day
-* Automatic tagging of events
+**Facts:**
+1. IndexedDB (fresh, 24h TTL)
+2. SW Runtime Cache
+3. Static JSON (`/static-data/YYYY-MM-DD.json`)
+4. Minimal offline fact (title only)
 
-### Backend Support (Not Considered)
+**Images:**
+1. IndexedDB metadata
+2. SW Cache (binary)
+3. Fresh network fetch (via imageEngine)
+4. Fallback category icon
 
-* User accounts
-* Favorites
-* Rate-limit handling
-* Aggregation and caching
+## Image Engine
 
----
+The image engine searches multiple sources and scores candidates:
 
-## Technology Stack
+- **Wikimedia** (40 points) - Highest authority
+- **NASA** (35 points) - For Science/Space categories
+- **Wikidata** (25 points) - Structured data
+- **Static** (10 points) - Curated images
+- **Fallback** (0 points) - Category icons
 
-* **Next.js**
-* **Client-side data fetching**
-* **Tailwind CSS**
-* Public and open APIs
+Scoring factors: source authority, exact match, resolution (400-1200px preferred), aspect ratio (landscape preferred), license (CC/Public Domain required).
 
----
+## Performance Targets
 
-## How It Works
+- **LCP**: < 2.5s on mid-tier devices
+- **TTI**: < 3s
+- **Image Load**: < 700ms cached, < 1500ms network
+- **Scroll Jank**: 0-1ms main thread blocks
 
-1. User selects a date from the UI.
-2. Client components make API calls based on month/day or full date.
-3. Raw data from different APIs is merged and normalized.
-4. UI renders events grouped by type (Events, Births, Deaths, Holidays, Space).
-5. Optional filters allow users to refine what they see.
+## Accessibility
 
----
+- ARIA roles and labels
+- Keyboard navigation (arrows, space, esc)
+- Screen reader support
+- Reduced motion support (`prefers-reduced-motion`)
+- Semantic HTML
 
-## Future Extensibility
+## License
 
-**DAY-LIGHT** is designed to scale into a more advanced platform including:
-
-* AI-generated insights
-* Personalized recommendations
-* Multi-language support
-* Database-backed content curation
-
-The architecture encourages plugging in additional data sources or features without breaking existing components.
-
----
-
-## [Contributing](CONTRIBUTING.md)
+MIT
