@@ -7,9 +7,11 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import type { Fact, FactEntry } from '@/types/fact';
 import { getFacts, setFacts } from '@/lib/indexedCache';
-import { formatDate, getMonthDay } from '@/utils/helpers';
+import { getMonthDay } from '@/utils/helpers';
 import { parseFact } from '@/lib/validators';
-import { safeJsonParse, isRateLimited, extractApiError } from '@/lib/apiSanitizer';
+import { isRateLimited } from '@/lib/apiSanitizer';
+const cloneFacts = (facts: Fact[]): Fact[] =>
+  JSON.parse(JSON.stringify(facts)) as Fact[];
 
 interface UseFactsResult {
   facts: Fact[];
@@ -25,77 +27,31 @@ const API_TIMEOUT = 2500; // 2.5 seconds
  */
 async function fetchFactsFromAPI(date: string, category?: string): Promise<Fact[]> {
   try {
-    const { month, day } = getMonthDay(date);
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), API_TIMEOUT);
-
-    // Determine API endpoint based on category
-    let endpoint = '';
-    if (category === 'Birthdays') {
-      endpoint = `https://api.wikimedia.org/feed/v1/wikipedia/en/onthisday/births/${month}/${day}`;
-    } else if (category === 'Historical') {
-      endpoint = `https://api.wikimedia.org/feed/v1/wikipedia/en/onthisday/events/${month}/${day}`;
-    } else {
-      // Default to events
-      endpoint = `https://api.wikimedia.org/feed/v1/wikipedia/en/onthisday/events/${month}/${day}`;
+    const params = new URLSearchParams({ date });
+    if (category) {
+      params.set('category', category);
     }
-
-    const response = await fetch(endpoint, { signal: controller.signal });
+    const response = await fetch(`/api/facts?${params.toString()}`, {
+      signal: controller.signal,
+      headers: { accept: 'application/json' },
+    });
     clearTimeout(timeoutId);
 
     if (!response.ok) {
-      // Check for rate limiting
       if (isRateLimited(response)) {
         throw new Error('API rate limit exceeded. Please try again later.');
       }
       throw new Error(`API error: ${response.status}`);
     }
-    
-    // Check if response is HTML error page
-    const contentType = response.headers.get('content-type');
-    if (contentType && contentType.includes('text/html')) {
-      throw new Error('API returned HTML instead of JSON');
+
+    const json = await response.json();
+    if (!json?.facts || !Array.isArray(json.facts)) {
+      return [];
     }
 
-    // Sanitize and parse JSON response
-    const { data, error: parseError } = await safeJsonParse<{
-      texts?: unknown[];
-      births?: unknown[];
-      events?: unknown[];
-    }>(response);
-    
-    if (parseError || !data) {
-      throw new Error(parseError?.message || 'Failed to parse API response');
-    }
-    
-    // Transform API response to Fact format
-    const facts: Fact[] = [];
-    const items = (data.texts || data.births || data.events || []) as Array<{
-      text?: string;
-      year?: number;
-      pages?: Array<{ title?: string; content_urls?: { desktop?: { page?: string } } }>;
-    }>;
-
-    items.forEach((item: any, index: number) => {
-      const fact: Fact = {
-        id: `${date}-${index}`,
-        title: item.text || item.pages?.[0]?.title || 'Untitled',
-        description: item.text,
-        name: item.pages?.[0]?.title,
-        date,
-        category: (category as any) || 'Historical',
-        year: item.year,
-        source: 'wikimedia',
-        sourceUrl: item.pages?.[0]?.content_urls?.desktop?.page,
-      };
-
-      const parsed = parseFact(fact);
-      if (parsed) {
-        facts.push(parsed);
-      }
-    });
-
-    return facts;
+    return json.facts as Fact[];
   } catch (error) {
     if (error instanceof Error && error.name === 'AbortError') {
       throw new Error('API request timeout');
@@ -107,20 +63,31 @@ async function fetchFactsFromAPI(date: string, category?: string): Promise<Fact[
 /**
  * Fetch facts from static JSON fallback
  */
+const missingStaticJsonDates = new Set<string>();
+
 async function fetchFactsFromStatic(date: string): Promise<Fact[]> {
+  if (missingStaticJsonDates.has(date)) {
+    return [];
+  }
+
   try {
     const response = await fetch(`/static-data/${date}.json`, {
       signal: AbortSignal.timeout(API_TIMEOUT),
     });
 
+    if (response.status === 404) {
+      missingStaticJsonDates.add(date);
+      return [];
+    }
+
     if (!response.ok) {
-      throw new Error(`Static JSON not found: ${response.status}`);
+      throw new Error(`Static JSON error: ${response.status}`);
     }
 
     const data = await response.json();
     return Array.isArray(data.facts) ? data.facts : [];
   } catch (error) {
-    console.error('Static JSON fetch failed:', error);
+    console.warn('Static JSON fetch failed:', error);
     return [];
   }
 }
@@ -182,11 +149,12 @@ export function useFacts(date: string, category?: string): UseFactsResult {
       // This is handled by SW automatically, try static JSON
       const staticFacts = await fetchFactsFromStatic(date);
       if (staticFacts.length > 0) {
-        setFactsState(staticFacts);
+        const safeStatic = cloneFacts(staticFacts);
+        setFactsState(safeStatic);
         setLoading(false);
         
         // Cache in IDB (non-blocking, can fail silently)
-        setFacts(date, staticFacts).catch((idbError) => {
+        setFacts(date, safeStatic).catch((idbError) => {
           console.warn('Failed to cache facts in IDB:', idbError);
         });
         
@@ -206,8 +174,9 @@ export function useFacts(date: string, category?: string): UseFactsResult {
       try {
         const apiFacts = await fetchFactsFromAPI(date, category);
         if (apiFacts.length > 0) {
-          setFactsState(apiFacts);
-          await setFacts(date, apiFacts);
+          const safeApiFacts = cloneFacts(apiFacts);
+          setFactsState(safeApiFacts);
+          await setFacts(date, safeApiFacts);
           setLoading(false);
           return;
         }
@@ -235,12 +204,13 @@ export function useFacts(date: string, category?: string): UseFactsResult {
     try {
       const apiFacts = await fetchFactsFromAPI(date, category);
       if (apiFacts.length > 0) {
+        const safeApiFacts = cloneFacts(apiFacts);
         // Update IDB (non-blocking)
-        setFacts(date, apiFacts).catch((idbError) => {
+        setFacts(date, safeApiFacts).catch((idbError) => {
           console.warn('Background: Failed to cache in IDB:', idbError);
         });
         // Update state
-        setFactsState(apiFacts);
+        setFactsState(safeApiFacts);
       }
     } catch (error) {
       // Silent fail in background - don't log to avoid noise

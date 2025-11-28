@@ -20,6 +20,10 @@ const nextConfig = {
         protocol: 'https',
         hostname: 'apod.nasa.gov',
       },
+      {
+        protocol: 'https',
+        hostname: 'static.photos',
+      },
     ],
     formats: ['image/avif', 'image/webp'],
   },

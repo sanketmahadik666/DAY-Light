@@ -74,7 +74,24 @@ export async function fetchWikidataData(entityName: string): Promise<{
           const imageName = imageClaim?.mainsnak?.datavalue?.value;
           
           if (imageName && typeof imageName === 'string') {
-            imageUrl = `https://commons.wikimedia.org/wiki/Special:FilePath/${encodeURIComponent(imageName)}?width=800`;
+            // Use Wikimedia API to get the direct image URL (avoid Special:FilePath redirects)
+            try {
+              const fileTitle = `File:${imageName}`;
+              const infoUrl = `https://commons.wikimedia.org/w/api.php?action=query&format=json&prop=imageinfo&iiprop=url|mime|size&titles=${encodeURIComponent(fileTitle)}&origin=*`;
+              const infoResp = await fetch(infoUrl, { signal: controller.signal });
+              if (infoResp.ok) {
+                const { data: infoData } = await safeJsonParse<{ query?: { pages?: Record<string, { imageinfo?: Array<{ url?: string }> }> } }>(infoResp);
+                const pages = infoData?.query?.pages || {};
+                const firstPage = Object.values(pages)[0] as any;
+                const directUrl = firstPage?.imageinfo?.[0]?.url;
+                if (directUrl && typeof directUrl === 'string') {
+                  imageUrl = directUrl;
+                }
+              }
+            } catch (err) {
+              // Silent fail - fall back to Special:FilePath only as last resort (but prefer none)
+              imageUrl = `https://commons.wikimedia.org/wiki/Special:FilePath/${encodeURIComponent(imageName)}?width=800`;
+            }
           }
         }
       } catch (err) {
@@ -236,6 +253,9 @@ export async function enhanceFactWithAdditionalSources(
   const searchTerm = fact.name || fact.title;
   if (!searchTerm) return fact;
 
+  // Work on a shallow copy to avoid mutating caller state
+  const enhancedFact: Fact = { ...fact };
+
   // Try Wikidata enhancement (non-blocking)
   try {
     const wikidataData = await Promise.race([
@@ -245,13 +265,13 @@ export async function enhanceFactWithAdditionalSources(
 
     if (wikidataData) {
       // Enhance description if available
-      if (wikidataData.description && !fact.description) {
-        fact.description = wikidataData.description.slice(0, 500);
+      if (wikidataData.description && !enhancedFact.description) {
+        enhancedFact.description = wikidataData.description.slice(0, 500);
       }
 
       // Add image if not present
-      if (wikidataData.imageUrl && !fact.imageUrl) {
-        fact.imageUrl = wikidataData.imageUrl;
+      if (wikidataData.imageUrl && !enhancedFact.imageUrl) {
+        enhancedFact.imageUrl = wikidataData.imageUrl;
       }
     }
   } catch (error) {
@@ -266,10 +286,10 @@ export async function enhanceFactWithAdditionalSources(
         new Promise<null>((resolve) => setTimeout(() => resolve(null), 2000)),
       ]);
 
-      if (apod?.url && !fact.imageUrl) {
-        fact.imageUrl = apod.hdurl || apod.url;
-        if (apod.explanation && !fact.description) {
-          fact.description = apod.explanation.slice(0, 500);
+      if (apod?.url && !enhancedFact.imageUrl) {
+        enhancedFact.imageUrl = apod.hdurl || apod.url;
+        if (apod.explanation && !enhancedFact.description) {
+          enhancedFact.description = apod.explanation.slice(0, 500);
         }
       }
     } catch (error) {
@@ -277,6 +297,6 @@ export async function enhanceFactWithAdditionalSources(
     }
   }
 
-  return fact;
+  return enhancedFact;
 }
 

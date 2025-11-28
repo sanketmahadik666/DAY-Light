@@ -2,6 +2,13 @@
 
 import Image from 'next/image';
 import { useState, useEffect } from 'react';
+const ALLOWED_HOSTS = new Set([
+  'upload.wikimedia.org',
+  'commons.wikimedia.org',
+  'images-assets.nasa.gov',
+  'apod.nasa.gov',
+  'static.photos',
+]);
 import { motion } from 'framer-motion';
 import type { ImageLoadStatus } from '@/types/fact';
 
@@ -91,30 +98,59 @@ export function ImageLayer({
           ease: 'easeOut',
         }}
       >
-        {useUltimateFallback ? (
-          // Use regular img for data URI (Next.js Image doesn't support data URIs well)
-          <img
-            src={ULTIMATE_FALLBACK}
-            alt={alt}
-            className="w-full h-full object-cover"
-            style={{ objectFit: 'cover' }}
-          />
-        ) : (
-          <Image
-            src={currentUrl}
-            alt={alt}
-            fill
-            priority={priority}
-            className="object-cover"
-            sizes="100vw"
-            quality={showHiRes ? 90 : 75}
-            onError={() => {
-              // If Next.js Image fails, fall back to data URI
-              setUseUltimateFallback(true);
-              setCurrentUrl(ULTIMATE_FALLBACK);
-            }}
-          />
-        )}
+        {(() => {
+          if (useUltimateFallback) {
+            return (
+              <img
+                src={ULTIMATE_FALLBACK}
+                alt={alt}
+                className="w-full h-full object-cover"
+                loading="lazy"
+              />
+            );
+          }
+
+          const canUseNextImage = (() => {
+            try {
+              const parsed = new URL(currentUrl, typeof window !== 'undefined' ? window.location.origin : 'http://localhost');
+              if (parsed.origin === (typeof window !== 'undefined' ? window.location.origin : parsed.origin)) return true;
+              return ALLOWED_HOSTS.has(parsed.hostname);
+            } catch {
+              return currentUrl.startsWith('/');
+            }
+          })();
+
+          if (!canUseNextImage) {
+            return (
+              <img
+                src={currentUrl}
+                alt={alt}
+                className="w-full h-full object-cover"
+                loading="lazy"
+                onError={() => {
+                  setUseUltimateFallback(true);
+                  setCurrentUrl(ULTIMATE_FALLBACK);
+                }}
+              />
+            );
+          }
+
+          return (
+            <Image
+              src={currentUrl}
+              alt={alt}
+              fill
+              priority={priority}
+              className="object-cover"
+              sizes="100vw"
+              quality={showHiRes ? 90 : 75}
+              onError={() => {
+                setUseUltimateFallback(true);
+                setCurrentUrl(ULTIMATE_FALLBACK);
+              }}
+            />
+          );
+        })()}
       </motion.div>
       
       {/* Gradient overlay for text legibility */}

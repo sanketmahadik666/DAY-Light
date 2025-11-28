@@ -32,11 +32,16 @@ export function FactSlide({
   return (
     <motion.div
       className="w-screen h-screen relative bg-black/5 dark:bg-black snap-start"
+      style={{ 
+        zIndex: 1, // Ensure slides are below modal (z-100) and button (z-60)
+        position: 'relative', // Ensure proper stacking context
+      }}
       role="group"
       aria-roledescription="slide"
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
+      transition={{ duration: 0.2 }} // Faster transition to prevent overlap
       onViewportEnter={onEnter}
       onViewportLeave={onExit}
     >

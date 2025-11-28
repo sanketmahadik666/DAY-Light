@@ -95,7 +95,7 @@ export function getFallbackIconPath(category: Category): string {
     Awards: 'trophy_icon',
     Technology: 'chip_or_circuit_icon',
   };
-  return `/fallback/${iconMap[category]}.png`;
+  return `/fallback/${iconMap[category]}.svg`;
 }
 
 /**

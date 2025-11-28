@@ -13,16 +13,17 @@ const CACHES = {
 
 const MAX_IMAGES = 120;
 const PRECACHED_ICONS = [
-  '/fallback/person_silhouette.png',
-  '/fallback/landmark_icon.png',
-  '/fallback/atom_or_rocket_icon.png',
-  '/fallback/currency_icon.png',
-  '/fallback/stadium_or_ball_icon.png',
-  '/fallback/colorful_event_icon.png',
-  '/fallback/galaxy_placeholder.png',
-  '/fallback/music_or_movie_icon.png',
-  '/fallback/trophy_icon.png',
-  '/fallback/chip_or_circuit_icon.png',
+  '/fallback/person_silhouette.svg',
+  '/fallback/landmark_icon.svg',
+  '/fallback/atom_or_rocket_icon.svg',
+  '/fallback/currency_icon.svg',
+  '/fallback/stadium_or_ball_icon.svg',
+  '/fallback/colorful_event_icon.svg',
+  '/fallback/galaxy_placeholder.svg',
+  '/fallback/music_or_movie_icon.svg',
+  '/fallback/trophy_icon.svg',
+  '/fallback/chip_or_circuit_icon.svg',
+  '/fallback/default-placeholder.png',
 ];
 
 // Allowed hosts for caching
@@ -31,6 +32,8 @@ const ALLOWED_HOSTS = [
   'commons.wikimedia.org',
   'images-assets.nasa.gov',
   'apod.nasa.gov',
+  'static.photos',
+  'api.openverse.engineering',
 ];
 
 // Never cache these paths
@@ -155,6 +158,11 @@ self.addEventListener('activate', (event) => {
 self.addEventListener('fetch', (event) => {
   const { request } = event;
   const url = new URL(request.url);
+
+  // Only handle image requests
+  if (request.destination !== 'image') {
+    return;
+  }
 
   // Never intercept Next.js internal routes
   if (BLOCKED_PATHS.some(path => url.pathname.startsWith(path))) {

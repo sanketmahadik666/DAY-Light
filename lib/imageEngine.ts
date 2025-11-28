@@ -4,11 +4,35 @@
  */
 
 import type { Fact, ImageMetadata, Category } from '@/types/fact';
-import { extractKeywords } from '@/utils/helpers';
+import { extractKeywords, getFallbackIconPath } from '@/utils/helpers';
 import { validateImageMetadata } from '@/lib/validators';
 import { safeJsonParse, isRateLimited } from '@/lib/apiSanitizer';
 
 const API_TIMEOUT = 2500; // 2.5 seconds
+const MAX_RETRIES = 2; // Retry failed requests up to 2 times
+const RETRY_DELAY = 500; // Initial retry delay in ms
+
+/**
+ * Retry helper with exponential backoff
+ */
+async function retryWithBackoff<T>(
+  fn: () => Promise<T>,
+  maxRetries: number = MAX_RETRIES,
+  delay: number = RETRY_DELAY
+): Promise<T | null> {
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      return await fn();
+    } catch (error) {
+      if (attempt === maxRetries) {
+        return null;
+      }
+      // Exponential backoff: delay * 2^attempt
+      await new Promise(resolve => setTimeout(resolve, delay * Math.pow(2, attempt)));
+    }
+  }
+  return null;
+}
 
 interface ImageCandidate {
   url: string;
@@ -18,7 +42,40 @@ interface ImageCandidate {
   height?: number;
   license?: string;
   score: number;
+  requiresValidation?: boolean;
+  alt?: string;
   metadata?: any;
+}
+
+const STATIC_PHOTO_CATEGORY_MAP: Record<Category, string> = {
+  Birthdays: 'people',
+  Historical: 'vintage',
+  Science: 'science',
+  Finance: 'finance',
+  Sports: 'sport',
+  Festivals: 'event',
+  Space: 'aerial',
+  PopCulture: 'event',
+  Awards: 'event',
+  Technology: 'technology',
+};
+
+const STATIC_PHOTO_BASE = 'https://static.photos';
+const DEFAULT_PLACEHOLDER = '/fallback/default-placeholder.png';
+
+function sanitizeImageUrl(url: string | undefined | null): string | null {
+  if (!url) return null;
+  try {
+    const parsed = new URL(url);
+    if (parsed.protocol !== 'https:') {
+      return null;
+    }
+    // Strip hash fragments to avoid caching mismatches
+    parsed.hash = '';
+    return parsed.toString();
+  } catch (error) {
+    return null;
+  }
 }
 
 /**
@@ -30,10 +87,12 @@ function scoreCandidate(candidate: ImageCandidate, fact: Fact): number {
   // Source authority (40 points max)
   const sourceScores: Record<ImageMetadata['source'], number> = {
     wikimedia: 40,
-    nasa: 35,
-    wikidata: 25,
-    static: 10,
-    fallback: 0,
+    wikidata: 35,
+    nasa: 30,
+    openverse: 25,
+    staticphotos: 15,
+    'fallback-icon': 5,
+    'fallback-default': 0,
   };
   score += sourceScores[candidate.source] || 0;
 
@@ -74,7 +133,7 @@ function scoreCandidate(candidate: ImageCandidate, fact: Fact): number {
       // Reject if no valid license
       return -1;
     }
-  } else if (candidate.source !== 'fallback') {
+  } else if (candidate.source !== 'fallback-icon' && candidate.source !== 'fallback-default') {
     // Reject non-fallback images without license
     return -1;
   }
@@ -96,137 +155,311 @@ function scoreCandidate(candidate: ImageCandidate, fact: Fact): number {
  * - Rate limit detection
  * - Graceful failure (never blocks UI)
  */
+/**
+ * Enhanced Wikimedia image fetch with retry and better search
+ */
 async function fetchWikimediaImage(keyword: string): Promise<ImageCandidate | null> {
-  try {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), API_TIMEOUT);
+  return retryWithBackoff(async () => {
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), API_TIMEOUT);
 
-    const searchUrl = `https://en.wikipedia.org/w/api.php?action=query&format=json&list=search&srsearch=${encodeURIComponent(keyword)}&srlimit=1&origin=*`;
-    const searchResponse = await fetch(searchUrl, { signal: controller.signal });
-    clearTimeout(timeoutId);
+      // Try multiple search strategies for better results
+      const searchStrategies = [
+        keyword, // Exact keyword
+        keyword.split(' ')[0], // First word
+        keyword.replace(/[^a-zA-Z0-9\s]/g, ' ').trim(), // Cleaned keyword
+      ];
 
-    if (!searchResponse.ok) return null;
-    
-    // Check for rate limiting
-    if (searchResponse.status === 429 || searchResponse.status === 503) {
-      console.warn('Wikimedia rate limit detected');
+      for (const searchTerm of searchStrategies) {
+        if (!searchTerm) continue;
+
+        const searchUrl = `https://en.wikipedia.org/w/api.php?action=query&format=json&list=search&srsearch=${encodeURIComponent(searchTerm)}&srlimit=3&origin=*`;
+        const searchResponse = await fetch(searchUrl, { signal: controller.signal });
+        
+        if (!searchResponse.ok) continue;
+        
+        // Check for rate limiting
+        if (searchResponse.status === 429 || searchResponse.status === 503) {
+          console.warn('Wikimedia rate limit detected');
+          continue;
+        }
+
+        // Sanitize and parse response
+        const { data: searchData, error: parseError } = await safeJsonParse<{
+          query?: { search?: Array<{ pageid?: number; title?: string }> };
+        }>(searchResponse);
+        
+        if (parseError || !searchData?.query?.search) continue;
+        
+        // Try each search result
+        for (const result of searchData.query.search) {
+          const pageId = result?.pageid;
+          if (!pageId || typeof pageId !== 'number') continue;
+
+          // Get page image with larger thumbnail
+          const imageUrl = `https://en.wikipedia.org/w/api.php?action=query&format=json&prop=pageimages&pithumbsize=1200&pageids=${pageId}&origin=*`;
+          const imageResponse = await fetch(imageUrl, { signal: controller.signal });
+          if (!imageResponse.ok) continue;
+
+          // Sanitize and parse image response
+          const { data: imageData, error: imageParseError } = await safeJsonParse<{
+            query?: { pages?: Record<string, { thumbnail?: { source?: string; width?: number; height?: number } }> };
+          }>(imageResponse);
+          
+          if (imageParseError || !imageData) continue;
+          
+          const page = imageData?.query?.pages?.[String(pageId)];
+          const thumbnail = page?.thumbnail;
+
+          if (!thumbnail?.source) continue;
+
+          const sanitizedUrl = sanitizeImageUrl(thumbnail.source);
+          if (!sanitizedUrl) continue;
+
+          clearTimeout(timeoutId);
+          return {
+            url: sanitizedUrl,
+            thumbnailUrl: sanitizedUrl,
+            source: 'wikimedia',
+            width: thumbnail.width,
+            height: thumbnail.height,
+            license: 'CC-BY-SA or compatible',
+            score: 0,
+            alt: result.title || keyword,
+          };
+        }
+      }
+
+      clearTimeout(timeoutId);
+      return null;
+    } catch (error) {
+      if (error instanceof Error && error.name !== 'AbortError') {
+        console.error('Wikimedia fetch error:', error);
+      }
       return null;
     }
-
-    // Sanitize and parse response
-    const { data: searchData, error: parseError } = await safeJsonParse<{
-      query?: { search?: Array<{ pageid?: number }> };
-    }>(searchResponse);
-    
-    if (parseError || !searchData) return null;
-    
-    const pageId = searchData?.query?.search?.[0]?.pageid;
-    if (!pageId || typeof pageId !== 'number') return null;
-
-    // Get page image
-    const imageUrl = `https://en.wikipedia.org/w/api.php?action=query&format=json&prop=pageimages&pithumbsize=800&pageids=${pageId}&origin=*`;
-    const imageResponse = await fetch(imageUrl, { signal: controller.signal });
-    if (!imageResponse.ok) return null;
-
-    // Sanitize and parse image response
-    const { data: imageData, error: imageParseError } = await safeJsonParse<{
-      query?: { pages?: Record<string, { thumbnail?: { source?: string; width?: number; height?: number } }> };
-    }>(imageResponse);
-    
-    if (imageParseError || !imageData) return null;
-    
-    const page = imageData?.query?.pages?.[String(pageId)];
-    const thumbnail = page?.thumbnail;
-
-    if (!thumbnail?.source) return null;
-
-    return {
-      url: thumbnail.source,
-      thumbnailUrl: thumbnail.source,
-      source: 'wikimedia',
-      width: thumbnail.width,
-      height: thumbnail.height,
-      license: 'CC-BY-SA or compatible', // Wikimedia default
-      score: 0, // Will be scored later
-    };
-  } catch (error) {
-    if (error instanceof Error && error.name !== 'AbortError') {
-      console.error('Wikimedia fetch error:', error);
-    }
-    return null;
-  }
+  });
 }
 
 /**
- * Fetch image from NASA API (for Science/Space categories)
+ * Enhanced NASA Images API fetch with best practices
+ * Uses proper query parameters, media_type filtering, and better result selection
  */
 async function fetchNASAImage(keyword: string): Promise<ImageCandidate | null> {
-  try {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), API_TIMEOUT);
+  return retryWithBackoff(async () => {
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), API_TIMEOUT);
 
-    const url = `https://images-api.nasa.gov/search?q=${encodeURIComponent(keyword)}&media_type=image&page_size=1`;
-    const response = await fetch(url, { signal: controller.signal });
-    clearTimeout(timeoutId);
+      // Best practice: Use media_type=image, page_size for pagination, year_start for relevance
+      // NASA API best practice: Use specific query parameters for better results
+      const url = `https://images-api.nasa.gov/search?q=${encodeURIComponent(keyword)}&media_type=image&page_size=5&year_start=2000`;
+      const response = await fetch(url, { 
+        signal: controller.signal,
+        headers: {
+          'Accept': 'application/json',
+        },
+      });
+      clearTimeout(timeoutId);
 
-    if (!response.ok) return null;
-    
-    // Check for rate limiting
-    if (isRateLimited(response)) {
-      console.warn('NASA API rate limit detected');
+      if (!response.ok) return null;
+      
+      // Check for rate limiting
+      if (isRateLimited(response)) {
+        console.warn('NASA API rate limit detected');
+        return null;
+      }
+
+      // Sanitize and parse response
+      const { data, error: parseError } = await safeJsonParse<{
+        collection?: { 
+          items?: Array<{ 
+            href?: string; 
+            data?: Array<{ 
+              title?: string;
+              description?: string;
+              width?: number; 
+              height?: number;
+              date_created?: string;
+            }> 
+          }> 
+        };
+      }>(response);
+      
+      if (parseError || !data?.collection?.items) return null;
+      
+      // Try multiple items to find best image
+      for (const item of data.collection.items) {
+        const href = item.href;
+        const metadata = item.data?.[0];
+
+        // Validate href exists and is a string
+        if (!href || typeof href !== 'string') continue;
+
+        // Get actual image URL from links
+        try {
+          // Use separate timeout for links fetch (2s) - faster than main timeout
+          const linksResponse = await fetch(href, { 
+            signal: AbortSignal.timeout(2000), // 2s timeout for links
+          });
+          if (!linksResponse.ok) continue;
+
+          // Sanitize links response
+          const { data: linksData, error: linksParseError } = await safeJsonParse<Array<{
+            render?: string;
+            href?: string;
+          }>>(linksResponse);
+          
+          if (linksParseError || !Array.isArray(linksData)) continue;
+          
+          // Find best image link (prefer render=image, then check extensions)
+          const imageLink = linksData.find((link) =>
+            link?.render === 'image' ||
+            (link?.href && (
+              link.href.endsWith('.jpg') || 
+              link.href.endsWith('.jpeg') || 
+              link.href.endsWith('.png') || 
+              link.href.endsWith('.webp')
+            ))
+          );
+
+          const sanitizedUrl = sanitizeImageUrl(imageLink?.href);
+          if (!sanitizedUrl) continue;
+
+          // Prefer images with good dimensions
+          if (metadata?.width && metadata?.height) {
+            const totalPixels = metadata.width * metadata.height;
+            if (totalPixels < 400 * 400) continue; // Too small
+          }
+
+          return {
+            url: sanitizedUrl,
+            source: 'nasa',
+            width: metadata?.width,
+            height: metadata?.height,
+            license: 'Public Domain', // NASA images are public domain
+            score: 0,
+            alt: metadata?.title || keyword,
+            metadata: {
+              ...metadata,
+              date_created: metadata?.date_created,
+            },
+          };
+        } catch (linkError) {
+          // Continue to next item if link fetch fails
+          continue;
+        }
+      }
+
+      return null;
+    } catch (error) {
+      if (error instanceof Error && error.name !== 'AbortError') {
+        console.error('NASA fetch error:', error);
+      }
       return null;
     }
+  });
+}
 
-    // Sanitize and parse response
-    const { data, error: parseError } = await safeJsonParse<{
-      collection?: { items?: Array<{ href?: string; data?: Array<{ width?: number; height?: number }> }> };
-    }>(response);
-    
-    if (parseError || !data) return null;
-    
-    const item = data?.collection?.items?.[0];
-    if (!item) return null;
+/**
+ * Fetch image from Wikimedia Commons using best practices
+ * Uses generator=search for better results and proper imageinfo properties
+ */
+async function fetchCommonsImageUrl(imageName: string, signal: AbortSignal): Promise<{ url: string; width?: number; height?: number } | null> {
+  const fileTitle = `File:${imageName}`;
+  // Best practice: Use iiprop=url|size|mime|thumbmime for comprehensive image info
+  // Use iiurlwidth for optimal thumbnail size (1200px for good quality)
+  const infoUrl = `https://commons.wikimedia.org/w/api.php?action=query&format=json&prop=imageinfo&iiprop=url|size|mime|thumbmime&iiurlwidth=1200&titles=${encodeURIComponent(fileTitle)}&origin=*`;
+  const response = await fetch(infoUrl, { signal });
+  if (!response.ok) return null;
 
-    const href = item.href;
-    const metadata = item.data?.[0];
+  const { data, error } = await safeJsonParse<{
+    query?: { pages?: Record<string, { imageinfo?: Array<{ url?: string; mime?: string; thumbmime?: string; width?: number; height?: number; thumburl?: string }> }> };
+  }>(response);
+  if (error || !data) return null;
 
-    // Validate href exists and is a string
-    if (!href || typeof href !== 'string') return null;
+  const pages = data.query?.pages || {};
+  const firstPage = Object.values(pages)[0] as { imageinfo?: Array<{ url?: string; mime?: string; thumbmime?: string; width?: number; height?: number; thumburl?: string }> };
+  const imageInfo = firstPage?.imageinfo?.[0];
+  if (!imageInfo?.url || !imageInfo?.mime?.startsWith('image/')) return null;
 
-    // Get actual image URL from links
-    const linksResponse = await fetch(href, { signal: controller.signal });
-    if (!linksResponse.ok) return null;
+  const sanitized = sanitizeImageUrl(imageInfo.url);
+  if (!sanitized) return null;
 
-    // Sanitize links response
-    const { data: linksData, error: linksParseError } = await safeJsonParse<Array<{
-      render?: string;
-      href?: string;
-    }>>(linksResponse);
-    
-    if (linksParseError || !Array.isArray(linksData)) return null;
-    
-    const imageLink = linksData.find((link) => 
-      link?.render === 'image' || 
-      (link?.href && (link.href.endsWith('.jpg') || link.href.endsWith('.png') || link.href.endsWith('.webp')))
-    );
+  return {
+    url: sanitized,
+    width: imageInfo.width,
+    height: imageInfo.height,
+  };
+}
 
-    if (!imageLink?.href) return null;
+/**
+ * Search Wikimedia Commons directly using generator=search (best practice)
+ * This is more efficient than searching Wikipedia first
+ */
+async function fetchWikimediaCommonsImage(keyword: string): Promise<ImageCandidate | null> {
+  return retryWithBackoff(async () => {
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), API_TIMEOUT);
 
-    return {
-      url: imageLink.href,
-      source: 'nasa',
-      width: metadata?.width,
-      height: metadata?.height,
-      license: 'Public Domain', // NASA images are public domain
-      score: 0,
-      metadata,
-    };
-  } catch (error) {
-    if (error instanceof Error && error.name !== 'AbortError') {
-      console.error('NASA fetch error:', error);
+      // Best practice: Use generator=search with gsrsearch for Commons search
+      // Use iiprop=url|size|mime for comprehensive image info
+      const searchUrl = `https://commons.wikimedia.org/w/api.php?action=query&format=json&generator=search&gsrsearch=${encodeURIComponent(keyword)}&gsrnamespace=6&gsrlimit=5&prop=imageinfo&iiprop=url|size|mime|thumbmime&iiurlwidth=1200&origin=*`;
+      const response = await fetch(searchUrl, { signal: controller.signal });
+      
+      if (!response.ok || isRateLimited(response)) {
+        clearTimeout(timeoutId);
+        return null;
+      }
+
+      const { data, error } = await safeJsonParse<{
+        query?: { pages?: Record<string, { title?: string; imageinfo?: Array<{ url?: string; mime?: string; width?: number; height?: number; thumburl?: string }> }> };
+      }>(response);
+      
+      if (error || !data?.query?.pages) {
+        clearTimeout(timeoutId);
+        return null;
+      }
+
+      // Find best image from results
+      const pages = Object.values(data.query.pages);
+      for (const page of pages) {
+        const imageInfo = page?.imageinfo?.[0];
+        if (!imageInfo?.url || !imageInfo?.mime?.startsWith('image/')) continue;
+
+        // Prefer images with good dimensions
+        if (imageInfo.width && imageInfo.height) {
+          const totalPixels = imageInfo.width * imageInfo.height;
+          if (totalPixels < 400 * 400) continue; // Too small
+        }
+
+        const sanitized = sanitizeImageUrl(imageInfo.url);
+        if (!sanitized) continue;
+
+        clearTimeout(timeoutId);
+        return {
+          url: sanitized,
+          thumbnailUrl: sanitizeImageUrl(imageInfo.thumburl) ?? sanitized,
+          source: 'wikimedia',
+          width: imageInfo.width,
+          height: imageInfo.height,
+          license: 'CC-BY-SA or compatible',
+          score: 0,
+          alt: page.title || keyword,
+        };
+      }
+
+      clearTimeout(timeoutId);
+      return null;
+    } catch (error) {
+      if (error instanceof Error && error.name !== 'AbortError') {
+        console.error('Wikimedia Commons fetch error:', error);
+      }
+      return null;
     }
-    return null;
-  }
+  });
 }
 
 /**
@@ -280,12 +513,15 @@ async function fetchWikidataImage(keyword: string): Promise<ImageCandidate | nul
     // Sanitize image name to prevent injection
     const sanitizedName = imageName.replace(/[^a-zA-Z0-9._-]/g, '');
     if (!sanitizedName) return null;
-    
-    const imageUrl = `https://commons.wikimedia.org/wiki/Special:FilePath/${encodeURIComponent(sanitizedName)}?width=800`;
+
+    const commonsImage = await fetchCommonsImageUrl(sanitizedName, controller.signal);
+    if (!commonsImage) return null;
 
     return {
-      url: imageUrl,
+      url: commonsImage.url,
       source: 'wikidata',
+      width: commonsImage.width,
+      height: commonsImage.height,
       license: 'CC-BY-SA or compatible',
       score: 0,
     };
@@ -298,6 +534,193 @@ async function fetchWikidataImage(keyword: string): Promise<ImageCandidate | nul
 }
 
 /**
+ * Enhanced Openverse API fetch with best practices
+ * Uses proper query parameters, license filtering, size filtering, and pagination
+ */
+async function fetchOpenverseImage(keyword: string): Promise<ImageCandidate | null> {
+  return retryWithBackoff(async () => {
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), API_TIMEOUT);
+      
+      // Best practice: Try different search terms for better results
+      const searchTerms = [
+        keyword,
+        keyword.split(' ').slice(0, 2).join(' '), // First two words
+        keyword.split(' ')[0], // First word only
+      ];
+
+      for (const searchTerm of searchTerms) {
+        if (!searchTerm) continue;
+
+        // Best practice: Use proper Openverse API parameters
+        // license: Filter by CC licenses (cc0, cc-by, cc-by-sa)
+        // size: Filter by size (small, medium, large)
+        // page_size: Number of results per page (max 20)
+        // aspect_ratio: Optional filter for aspect ratio
+        const url = `https://api.openverse.engineering/v1/images/?q=${encodeURIComponent(searchTerm)}&license=cc0,cc-by,cc-by-sa&license_type=commercial,modification&size=medium,large&page_size=5&page=1`;
+        const response = await fetch(url, { 
+          signal: controller.signal,
+          headers: {
+            'Accept': 'application/json',
+            'User-Agent': 'DAY-LIGHT/3.0 (+https://daylight.app)',
+          },
+        });
+        
+        if (!response.ok || isRateLimited(response)) {
+          // Check rate limit headers
+          const retryAfter = response.headers.get('retry-after');
+          if (retryAfter) {
+            console.warn(`Openverse rate limit: retry after ${retryAfter}s`);
+          }
+          continue;
+        }
+
+        const { data, error } = await safeJsonParse<{
+          results?: Array<{
+            id?: string;
+            url?: string;
+            thumbnail?: string;
+            width?: number;
+            height?: number;
+            license?: string;
+            license_version?: string;
+            title?: string;
+            creator?: string;
+            creator_url?: string;
+            foreign_landing_url?: string;
+          }>;
+          result_count?: number;
+        }>(response);
+        
+        if (error || !data?.results?.length) continue;
+
+        // Try each result to find the best one
+        // Best practice: Score results by quality metrics
+        const scoredResults = data.results
+          .map(image => {
+            let score = 0;
+            
+            // Prefer images with good dimensions
+            if (image.width && image.height) {
+              const totalPixels = image.width * image.height;
+              if (totalPixels >= 800 * 600 && totalPixels <= 2000 * 1500) {
+                score += 10; // Optimal size
+              } else if (totalPixels >= 400 * 400) {
+                score += 5; // Acceptable size
+              } else {
+                return null; // Too small
+              }
+              
+              // Prefer landscape images
+              const aspectRatio = image.width / image.height;
+              if (aspectRatio >= 1.2 && aspectRatio <= 2.0) {
+                score += 5; // Good aspect ratio
+              }
+            }
+            
+            // Prefer CC0 (public domain equivalent)
+            if (image.license === 'cc0') {
+              score += 5;
+            }
+            
+            return { image, score };
+          })
+          .filter((item): item is { image: NonNullable<typeof data.results[0]>, score: number } => item !== null)
+          .sort((a, b) => b.score - a.score);
+
+        // Try best scored results first
+        for (const { image } of scoredResults) {
+          const sanitizedUrl = sanitizeImageUrl(image.url);
+          if (!sanitizedUrl) continue;
+
+          clearTimeout(timeoutId);
+          return {
+            url: sanitizedUrl,
+            thumbnailUrl: sanitizeImageUrl(image.thumbnail) ?? sanitizedUrl,
+            source: 'openverse',
+            width: image.width,
+            height: image.height,
+            license: image.license ? `CC ${image.license.toUpperCase()}${image.license_version ? ` ${image.license_version}` : ''}` : 'Creative Commons',
+            score: 0,
+            alt: image.title || keyword,
+            metadata: {
+              id: image.id,
+              creator: image.creator,
+              creator_url: image.creator_url,
+              foreign_landing_url: image.foreign_landing_url,
+            },
+          };
+        }
+      }
+
+      clearTimeout(timeoutId);
+      return null;
+    } catch (error) {
+      if (error instanceof Error && error.name !== 'AbortError') {
+        console.error('Openverse fetch error:', error);
+      }
+      return null;
+    }
+  });
+}
+
+/**
+ * Fetch image from StaticPhotos service
+ * Best practice: Use category mapping for relevant images
+ * Note: StaticPhotos is a simple URL-based service, no API key required
+ */
+async function fetchStaticPhotosImage(category: Category): Promise<ImageCandidate | null> {
+  try {
+    const mapped = STATIC_PHOTO_CATEGORY_MAP[category] || 'event';
+    
+    // Best practice: Use optimal dimensions for web (16:9 aspect ratio)
+    // Common sizes: 1200x630 (Facebook), 1920x1080 (Full HD), 1600x900 (HD)
+    // We use 1200x630 for good quality and reasonable file size
+    const url = `${STATIC_PHOTO_BASE}/${mapped}/1200x630`;
+    const sanitizedUrl = sanitizeImageUrl(url);
+    if (!sanitizedUrl) return null;
+    
+    // Validate URL is accessible (non-blocking check)
+    // Note: StaticPhotos URLs are deterministic, so we can trust them
+    // But we should validate the response is actually an image
+    return {
+      url: sanitizedUrl,
+      source: 'staticphotos',
+      license: 'StaticPhotos',
+      score: 0,
+      requiresValidation: true, // Validate it's actually an image
+      alt: `${category} category image`,
+    };
+  } catch (error) {
+    console.error('StaticPhotos fetch error:', error);
+    return null;
+  }
+}
+
+function getLocalFallbackCandidate(category: Category): ImageCandidate {
+  return {
+    url: getFallbackIconPath(category),
+    source: 'fallback-icon',
+    license: 'Local Fallback',
+    score: 0,
+    requiresValidation: false,
+    alt: `${category} fallback icon`,
+  };
+}
+
+function getDefaultPlaceholderCandidate(): ImageCandidate {
+  return {
+    url: DEFAULT_PLACEHOLDER,
+    source: 'fallback-default',
+    license: 'Generic Placeholder',
+    score: 0,
+    requiresValidation: false,
+    alt: 'Generic placeholder image',
+  };
+}
+
+/**
  * Validate and fetch image metadata (check MIME type, size)
  */
 export async function validateImage(url: string): Promise<{ valid: boolean; metadata?: Partial<ImageMetadata> }> {
@@ -305,13 +728,16 @@ export async function validateImage(url: string): Promise<{ valid: boolean; meta
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), API_TIMEOUT);
 
-    const response = await fetch(url, { 
+    const response = await fetch(url, {
       signal: controller.signal,
-      method: 'HEAD', // Only fetch headers
+      method: 'HEAD',
+      redirect: 'manual',
     });
     clearTimeout(timeoutId);
 
-    if (!response.ok) return { valid: false };
+    if (!response.ok || (response.status >= 300 && response.status < 400)) {
+      return { valid: false };
+    }
 
     const contentType = response.headers.get('content-type');
     const contentLength = response.headers.get('content-length');
@@ -338,85 +764,181 @@ export async function validateImage(url: string): Promise<{ valid: boolean; meta
 }
 
 /**
- * Main image engine: Find best image for a fact
+ * Enhanced candidate selection with parallel fetching and better scoring
+ */
+async function selectBestCandidateFromTier(
+  fetchers: Array<() => Promise<ImageCandidate | null>>,
+  fact: Fact
+): Promise<ImageMetadata | null> {
+  if (fetchers.length === 0) return null;
+  
+  // Fetch all candidates in parallel for speed
+  const results = await Promise.allSettled(
+    fetchers.map(fetcher => fetcher().catch(() => null))
+  );
+  
+  const candidates = results
+    .filter((result): result is PromiseFulfilledResult<ImageCandidate | null> => 
+      result.status === 'fulfilled' && result.value !== null
+    )
+    .map(result => result.value as ImageCandidate);
+  
+  if (candidates.length === 0) return null;
+
+  // Score all candidates
+  const scoredCandidates = candidates
+    .map(candidate => ({
+      candidate,
+      score: scoreCandidate(candidate, fact),
+    }))
+    .filter(item => item.score >= 0)
+    .sort((a, b) => {
+      // Sort by score, then by source priority
+      if (b.score !== a.score) return b.score - a.score;
+      const sourcePriority: Record<ImageMetadata['source'], number> = {
+        wikimedia: 1,
+        wikidata: 2,
+        nasa: 3,
+        openverse: 4,
+        staticphotos: 5,
+        'fallback-icon': 6,
+        'fallback-default': 7,
+      };
+      return (sourcePriority[a.candidate.source] || 99) - (sourcePriority[b.candidate.source] || 99);
+    });
+
+  // Validate and return best candidate
+  for (const item of scoredCandidates) {
+    const candidate = item.candidate;
+    
+    // Skip validation for local fallbacks
+    if (candidate.requiresValidation === false) {
+      return buildMetadata(candidate, fact);
+    }
+    
+    // Validate remote images
+    const validation = await validateImage(candidate.url);
+    if (validation.valid) {
+      return buildMetadata(candidate, fact, validation.metadata);
+    }
+  }
+
+  return null;
+}
+
+function buildMetadata(
+  candidate: ImageCandidate,
+  fact: Fact,
+  validation?: Partial<ImageMetadata>
+): ImageMetadata {
+  return {
+    url: candidate.url,
+    thumbnailUrl: candidate.thumbnailUrl || candidate.url,
+    source: candidate.source,
+    width: candidate.width,
+    height: candidate.height,
+    aspectRatio:
+      candidate.width && candidate.height ? candidate.width / candidate.height : undefined,
+    license: candidate.license,
+    alt: candidate.alt || `${fact.title} - ${fact.category}`,
+    cachedAt: Date.now(),
+    size: validation?.size,
+    mimeType: validation?.mimeType,
+  };
+}
+
+/**
+ * Enhanced main image engine: Find best image for a fact
+ * Tries multiple keywords and strategies for best results
  */
 export async function findImageForFact(fact: Fact): Promise<ImageMetadata | null> {
   try {
-    // Extract keywords
+    // Extract keywords with multiple strategies
     const text = `${fact.title} ${fact.description || ''} ${fact.name || ''}`;
     const keywords = extractKeywords(text);
-    const primaryKeyword = keywords[0] || fact.title;
-
-    // Fetch from multiple sources in parallel
-    const sources: Promise<ImageCandidate | null>[] = [];
-
-    // Always try Wikimedia first (highest authority)
-    sources.push(fetchWikimediaImage(primaryKeyword));
-
-    // Try Wikidata
-    sources.push(fetchWikidataImage(primaryKeyword));
-
-    // Try NASA for Science/Space categories
-    if (fact.category === 'Science' || fact.category === 'Space') {
-      sources.push(fetchNASAImage(primaryKeyword));
+    
+    // Build keyword priority list
+    const keywordList: string[] = [];
+    
+    // Add primary keywords
+    if (keywords.length > 0) {
+      keywordList.push(keywords[0]);
+      if (keywords.length > 1) keywordList.push(keywords[1]);
     }
+    
+    // Add fact title if not already included
+    if (fact.title && !keywordList.includes(fact.title.toLowerCase())) {
+      keywordList.push(fact.title);
+    }
+    
+    // Add fact name if available
+    if (fact.name && !keywordList.includes(fact.name.toLowerCase())) {
+      keywordList.push(fact.name);
+    }
+    
+    // Fallback to title if no keywords
+    if (keywordList.length === 0) {
+      keywordList.push(fact.title || 'history');
+    }
+    
+    const primaryKeyword = keywordList[0];
 
-    // Wait for all sources (with timeout)
-    const results = await Promise.allSettled(sources);
-    const candidates: ImageCandidate[] = [];
+    // Build tier fetchers with enhanced strategies
+    const tierFetchers: Array<Array<() => Promise<ImageCandidate | null>>> = [
+      // Tier 1: High-quality sources (parallel fetch)
+      // Best practice: Try multiple sources in parallel for speed
+      [
+        () => fetchWikimediaImage(primaryKeyword),
+        () => fetchWikimediaCommonsImage(primaryKeyword), // Direct Commons search
+        () => fetchWikidataImage(primaryKeyword),
+        // Try alternative keywords
+        ...(keywordList.length > 1 ? [
+          () => fetchWikimediaImage(keywordList[1]),
+          () => fetchWikimediaCommonsImage(keywordList[1]),
+        ] : []),
+      ],
+      // Tier 2: Category-specific sources
+      fact.category === 'Space' || fact.category === 'Science'
+        ? [
+            () => fetchNASAImage(primaryKeyword),
+            ...(keywordList.length > 1 ? [() => fetchNASAImage(keywordList[1])] : []),
+          ]
+        : [],
+      // Tier 3: Creative Commons sources
+      [
+        () => fetchOpenverseImage(primaryKeyword),
+        ...(keywordList.length > 1 ? [() => fetchOpenverseImage(keywordList[1])] : []),
+      ],
+      // Tier 4: Static category photos
+      [
+        () => fetchStaticPhotosImage(fact.category),
+      ],
+      // Tier 5: Local fallback icons
+      [
+        async () => getLocalFallbackCandidate(fact.category),
+      ],
+      // Tier 6: Generic placeholder
+      [
+        async () => getDefaultPlaceholderCandidate(),
+      ],
+    ];
 
-    for (const result of results) {
-      if (result.status === 'fulfilled' && result.value) {
-        candidates.push(result.value);
+    // Try each tier sequentially (but parallel within tier)
+    for (const tier of tierFetchers) {
+      if (tier.length === 0) continue;
+      
+      const metadata = await selectBestCandidateFromTier(tier, fact);
+      if (metadata) {
+        return metadata;
       }
     }
 
-    if (candidates.length === 0) {
-      return null; // No candidates found, will use fallback
-    }
-
-    // Score all candidates
-    const scoredCandidates = candidates
-      .map(candidate => ({
-        ...candidate,
-        score: scoreCandidate(candidate, fact),
-      }))
-      .filter(c => c.score >= 0) // Remove rejected candidates
-      .sort((a, b) => b.score - a.score); // Sort by score descending
-
-    if (scoredCandidates.length === 0) {
-      return null;
-    }
-
-    const bestCandidate = scoredCandidates[0];
-
-    // Validate the image
-    const validation = await validateImage(bestCandidate.url);
-    if (!validation.valid) {
-      return null;
-    }
-
-    // Build metadata
-    const metadata: ImageMetadata = {
-      url: bestCandidate.url,
-      thumbnailUrl: bestCandidate.thumbnailUrl || bestCandidate.url,
-      source: bestCandidate.source,
-      width: bestCandidate.width,
-      height: bestCandidate.height,
-      aspectRatio: bestCandidate.width && bestCandidate.height
-        ? bestCandidate.width / bestCandidate.height
-        : undefined,
-      license: bestCandidate.license,
-      alt: `${fact.title} - ${fact.category}`,
-      cachedAt: Date.now(),
-      size: validation.metadata?.size,
-      mimeType: validation.metadata?.mimeType,
-    };
-
-    return metadata;
+    // Final guard: return generic placeholder (should never reach here)
+    return buildMetadata(getDefaultPlaceholderCandidate(), fact);
   } catch (error) {
     console.error('Image engine error:', error);
-    return null; // Gracefully fail
+    // Return fallback instead of null
+    return buildMetadata(getLocalFallbackCandidate(fact.category), fact);
   }
 }
 

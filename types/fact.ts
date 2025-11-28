@@ -31,7 +31,7 @@ export interface Fact {
 export interface ImageMetadata {
   url: string;
   thumbnailUrl?: string;
-  source: 'wikimedia' | 'wikidata' | 'nasa' | 'static' | 'fallback';
+  source: 'wikimedia' | 'wikidata' | 'nasa' | 'openverse' | 'staticphotos' | 'fallback-icon' | 'fallback-default';
   width?: number;
   height?: number;
   aspectRatio?: number;

@@ -19,6 +19,7 @@ export function GalleryScroller({
 }: GalleryScrollerProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [visibleRange, setVisibleRange] = useState({ start: 0, end: 10 });
+  const prevSlidesLengthRef = useRef<number>(slides.length);
 
   useEffect(() => {
     // Update visible range based on current index
@@ -52,11 +53,31 @@ export function GalleryScroller({
     if (!container) return;
 
     const slideHeight = window.innerHeight;
-    container.scrollTo({
-      top: currentIndex * slideHeight,
-      behavior: 'smooth',
+    
+    // CRITICAL: If slides array changed (new date/facts), ALWAYS jump instantly
+    // This prevents overlap during date changes
+    const slidesChanged = prevSlidesLengthRef.current !== slides.length;
+    const isAtTop = container.scrollTop === 0;
+    
+    // Always use 'auto' (instant) if slides changed or at top
+    // Only use 'smooth' for normal navigation within same slides
+    const behavior: ScrollBehavior = slidesChanged || isAtTop
+      ? 'auto'
+      : 'smooth';
+
+    // Use requestAnimationFrame to ensure DOM is ready
+    requestAnimationFrame(() => {
+      if (container) {
+        container.scrollTo({
+          top: currentIndex * slideHeight,
+          behavior,
+        });
+      }
     });
-  }, [currentIndex]);
+
+    // Update previous length for next render
+    prevSlidesLengthRef.current = slides.length;
+  }, [currentIndex, slides.length]);
 
   return (
     <div
