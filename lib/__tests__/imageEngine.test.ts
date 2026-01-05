@@ -87,37 +87,47 @@ jest.mock('@/lib/apiSanitizer', () => ({
       source: 'test',
     };
 
-    it('should return null when all sources fail', async () => {
+    it('should return fallback when all sources fail', async () => {
       mockFetch.mockRejectedValue(new Error('Network error'));
-
+      
       const result = await findImageForFact(baseFact);
-      expect(result).toBeNull();
+      expect(result).not.toBeNull();
+      expect(result?.source).toBe('fallback-default'); // or 'fallback-icon' depending on logic
     });
 
     it('should return image metadata when validation succeeds', async () => {
-      // Mock Wikipedia search
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        text: () => Promise.resolve('{"query":{"search":[{"pageid":123}]}}'),
-      } as Response);
-
-      // Mock Wikipedia image API
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        text: () => Promise.resolve('{"query":{"pages":{"123":{"thumbnail":{"source":"https://example.com/img.jpg","width":400,"height":300}}}}}'),
-      } as Response);
-
-      // Mock image validation
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        headers: {
-          get: (name: string) => {
-            if (name === 'content-type') return 'image/jpeg';
-            if (name === 'content-length') return '100000';
-            return null;
-          },
-        },
-      } as Response);
+      // Mock fetch based on URL
+      mockFetch.mockImplementation(async (urlInput) => {
+         const url = urlInput.toString();
+         if (url.includes('action=query&format=json&list=search')) {
+             return {
+                 ok: true,
+                 text: () => Promise.resolve('{"query":{"search":[{"pageid":123}]}}'),
+                 headers: { get: () => 'application/json' }
+             } as unknown as Response;
+         }
+         if (url.includes('prop=pageimages')) {
+             return {
+                 ok: true,
+                 text: () => Promise.resolve('{"query":{"pages":{"123":{"thumbnail":{"source":"https://example.com/img.jpg","width":400,"height":300}}}}}'),
+                 headers: { get: () => 'application/json' }
+             } as unknown as Response;
+         }
+         if (url === 'https://example.com/img.jpg') {
+             return {
+                 ok: true,
+                 headers: {
+                    get: (name: string) => {
+                        if (name === 'content-type') return 'image/jpeg';
+                        if (name === 'content-length') return '100000';
+                        return null;
+                    }
+                 }
+             } as unknown as Response;
+         }
+         // Fail others
+         return { ok: false, status: 404 } as unknown as Response;
+      });
 
       const result = await findImageForFact(baseFact);
       expect(result).toBeDefined();
@@ -128,39 +138,56 @@ jest.mock('@/lib/apiSanitizer', () => ({
     it('should handle timeout gracefully', async () => {
       const abortError = new Error('Aborted');
       abortError.name = 'AbortError';
-      mockFetch.mockRejectedValue(abortError);
+      // Mock fetch to simulate abort or just generic failure
+      mockFetch.mockImplementation(() => Promise.reject(abortError));
 
       const result = await findImageForFact(baseFact);
-      expect(result).toBeNull();
+      // Should result in fallback
+      expect(result?.source).toContain('fallback');
     });
 
     it('should try NASA for Science category', async () => {
       const scienceFact = { ...baseFact, category: 'Science' as const };
-
-      // Mock all fetches to fail except NASA
-      mockFetch.mockRejectedValue(new Error('Network error'));
-
-      // Mock NASA API
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        text: () => Promise.resolve('{"collection":{"items":[{"href":"https://nasa.gov/img"}]}}'),
-      } as Response);
-
-      // Mock NASA links API
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        text: () => Promise.resolve('[{"render":"image","href":"https://nasa.gov/final.jpg"}]'),
-      } as Response);
-
-      // Mock validation
-      mockFetch.mockResolvedValueOnce({
-        ok: true,
-        headers: {
-          get: (name: string) => 'image/jpeg',
-        },
-      } as Response);
+      
+      mockFetch.mockImplementation(async (urlInput) => {
+         const url = urlInput.toString();
+         if (url.includes('images-api.nasa.gov')) {
+            return {
+                ok: true,
+                text: () => Promise.resolve('{"collection":{"items":[{"href":"https://nasa.gov/img"}]}}'),
+                headers: { get: () => 'application/json' }
+            } as unknown as Response;
+         }
+         if (url === 'https://nasa.gov/img') {
+             return {
+                 ok: true,
+                 text: () => Promise.resolve('[{"render":"image","href":"https://nasa.gov/final.jpg"}]'),
+                 headers: { get: () => 'application/json' }
+             } as unknown as Response;
+         }
+         if (url === 'https://nasa.gov/final.jpg') {
+            return {
+                ok: true,
+                 headers: {
+                    get: (name: string) => {
+                        if (name === 'content-type') return 'image/jpeg';
+                        if (name === 'content-length') return '100000';
+                        return null;
+                    }
+                 }
+            } as unknown as Response;
+         }
+         return { ok: false, status: 404 } as unknown as Response;
+      });
 
       const result = await findImageForFact(scienceFact);
+      
+      // Since parallel execution, NASA fetch should resolve.
+      // However, Wikimedia fetch (Tier 1) also runs in parallel?
+      // No, Tier 1 is Wikimedia. Tier 2 is NASA.
+      // Logic: tries Tier 1. If Tier 1 returns null, tries Tier 2.
+      // My mock fails Wikimedia (returns 404), so it should fall through to NASA.
+      
       expect(result?.source).toBe('nasa');
     });
   });

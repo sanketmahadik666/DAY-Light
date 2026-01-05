@@ -34,60 +34,37 @@ export function ImageLayer({
   priority = false,
   isActive = false,
 }: ImageLayerProps) {
-  const [currentUrl, setCurrentUrl] = useState<string>(fallbackIcon);
-  const [status, setStatus] = useState<ImageLoadStatus['status']>('loading');
-  const [showHiRes, setShowHiRes] = useState(false);
   const [useUltimateFallback, setUseUltimateFallback] = useState(false);
+  // Track if we should show the main image
+  const [imageSrc, setImageSrc] = useState<string>(imageUrl || fallbackIcon);
+  const [isLoaded, setIsLoaded] = useState(false);
 
   useEffect(() => {
+    // Reset state when inputs change
     if (imageUrl) {
-      setCurrentUrl(imageUrl);
-      setStatus('loading');
-      setUseUltimateFallback(false);
-      
-      // Preload image
-      const img = new window.Image();
-      img.onload = () => {
-        setStatus('loaded');
-        setTimeout(() => setShowHiRes(true), 100);
-      };
-      img.onerror = () => {
-        setStatus('error');
-        // Try fallback icon
-        setCurrentUrl(fallbackIcon);
-        // Test if fallback icon exists (non-blocking check)
-        const fallbackImg = new window.Image();
-        fallbackImg.onerror = () => {
-          // Fallback icon missing, use ultimate fallback
-          setUseUltimateFallback(true);
-          setCurrentUrl(ULTIMATE_FALLBACK);
-        };
-        fallbackImg.onload = () => {
-          setUseUltimateFallback(false);
-        };
-        fallbackImg.src = fallbackIcon;
-      };
-      img.src = imageUrl;
-    } else {
-      // No image URL, use fallback icon
-      setCurrentUrl(fallbackIcon);
-      setStatus('fallback');
-      // Test if fallback icon exists (non-blocking check)
-      const fallbackImg = new window.Image();
-      fallbackImg.onerror = () => {
-        // Fallback icon missing, use ultimate fallback
-        setUseUltimateFallback(true);
-        setCurrentUrl(ULTIMATE_FALLBACK);
-      };
-      fallbackImg.onload = () => {
+        setImageSrc(imageUrl);
         setUseUltimateFallback(false);
-      };
-      fallbackImg.src = fallbackIcon;
+        setIsLoaded(false);
+    } else {
+        setImageSrc(fallbackIcon);
+        setUseUltimateFallback(imageUrl === null); // If explicitly null, maybe don't fallback immediately? Logic says null = fallback
+        setIsLoaded(false);
     }
   }, [imageUrl, fallbackIcon]);
 
+  const handleError = () => {
+    if (imageSrc !== fallbackIcon && imageSrc !== ULTIMATE_FALLBACK) {
+        // First fallback level
+        setImageSrc(fallbackIcon);
+    } else if (imageSrc === fallbackIcon) {
+        // Second fallback level
+        setUseUltimateFallback(true);
+        setImageSrc(ULTIMATE_FALLBACK);
+    }
+  };
+
   return (
-    <div className="absolute inset-0 z-0 overflow-hidden">
+    <div className="absolute inset-0 z-0 overflow-hidden bg-gray-900">
       <motion.div
         className="absolute inset-0"
         animate={{
@@ -98,59 +75,36 @@ export function ImageLayer({
           ease: 'easeOut',
         }}
       >
-        {(() => {
-          if (useUltimateFallback) {
-            return (
-              <img
-                src={ULTIMATE_FALLBACK}
-                alt={alt}
-                className="w-full h-full object-cover"
-                loading="lazy"
-              />
-            );
-          }
-
-          const canUseNextImage = (() => {
-            try {
-              const parsed = new URL(currentUrl, typeof window !== 'undefined' ? window.location.origin : 'http://localhost');
-              if (parsed.origin === (typeof window !== 'undefined' ? window.location.origin : parsed.origin)) return true;
-              return ALLOWED_HOSTS.has(parsed.hostname);
-            } catch {
-              return currentUrl.startsWith('/');
-            }
-          })();
-
-          if (!canUseNextImage) {
-            return (
-              <img
-                src={currentUrl}
-                alt={alt}
-                className="w-full h-full object-cover"
-                loading="lazy"
-                onError={() => {
-                  setUseUltimateFallback(true);
-                  setCurrentUrl(ULTIMATE_FALLBACK);
-                }}
-              />
-            );
-          }
-
-          return (
-            <Image
-              src={currentUrl}
+        {useUltimateFallback ? (
+           <img
+             src={ULTIMATE_FALLBACK}
+             alt={alt}
+             className="w-full h-full object-cover opacity-50"
+             loading="lazy"
+           />
+        ) : (
+             <Image
+              src={imageSrc}
               alt={alt}
               fill
               priority={priority}
-              className="object-cover"
+              className={`object-cover transition-opacity duration-500 ${isLoaded ? 'opacity-100' : 'opacity-0'}`}
               sizes="100vw"
-              quality={showHiRes ? 90 : 75}
-              onError={() => {
-                setUseUltimateFallback(true);
-                setCurrentUrl(ULTIMATE_FALLBACK);
-              }}
+              onLoad={() => setIsLoaded(true)}
+              onError={handleError}
+              unoptimized={imageSrc.startsWith('http') && !ALLOWED_HOSTS.has(new URL(imageSrc).hostname)} // Skip optimization for unknown hosts to avoid 400s from Next.js
             />
-          );
-        })()}
+        )}
+        
+        {/* Placeholder/Loading State - show fallback underneath while loading */}
+        {!isLoaded && !useUltimateFallback && (
+             <img
+                src={fallbackIcon}
+                alt=""
+                className="absolute inset-0 w-full h-full object-cover opacity-50 blur-sm"
+            />
+        )}
+
       </motion.div>
       
       {/* Gradient overlay for text legibility */}

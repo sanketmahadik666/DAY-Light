@@ -54,6 +54,10 @@ export async function safeJsonParse<T>(response: Response): Promise<{ data: T | 
     const data = JSON.parse(text) as T;
     return { data, error: null };
   } catch (error) {
+    if (error instanceof Error && error.name === 'AbortError') {
+         // Propagate abort error
+         throw error;
+    }
     return {
       data: null,
       error: error instanceof Error ? error : new Error('Failed to parse JSON'),

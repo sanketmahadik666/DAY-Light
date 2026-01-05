@@ -23,133 +23,101 @@ interface UseImageForFactResult {
  * Main hook: useImageForFact
  */
 export function useImageForFact(fact: Fact): UseImageForFactResult {
-  const [thumbnailUrl, setThumbnailUrl] = useState<string | null>(null);
-  const [hiResUrl, setHiResUrl] = useState<string | null>(null);
-  const [status, setStatus] = useState<ImageLoadStatus['status']>('loading');
-  const [source, setSource] = useState<ImageMetadata['source'] | null>(null);
+  const [state, setState] = useState<Omit<UseImageForFactResult, 'fallbackIcon'>>({
+    thumbnailUrl: null,
+    hiResUrl: null,
+    status: 'loading',
+    source: null,
+  });
   const fallbackIcon = getFallbackIconPath(fact.category);
 
-  const loadImage = useCallback(async () => {
-    // Always return fallback immediately
-    setStatus('fallback');
-    setSource('fallback-icon');
-    setThumbnailUrl(fallbackIcon);
-    setHiResUrl(fallbackIcon);
-
+  useEffect(() => {
     if (!fact) return;
 
+    const controller = new AbortController();
+    const signal = controller.signal;
     const slug = normalizeKey(fact.title || fact.id);
 
-    try {
-      // Layer 1: IndexedDB metadata
-      const cachedImage = await getImage(fact.category, slug);
-      if (cachedImage && cachedImage.value.url) {
-        setThumbnailUrl(cachedImage.value.thumbnailUrl || cachedImage.value.url);
-        setHiResUrl(cachedImage.value.url);
-        setStatus('loaded');
-        setSource(cachedImage.value.source);
-        return;
+    // Initial state reset
+    setState({
+      thumbnailUrl: fallbackIcon,
+      hiResUrl: fallbackIcon,
+      status: 'fallback',
+      source: 'fallback-icon',
+    });
+
+    const load = async () => {
+      // Layer 1: Check IndexedDB (Fastest Local)
+      try {
+        const cachedImage = await getImage(fact.category, slug);
+        if (signal.aborted) return;
+
+        if (cachedImage && cachedImage.value.url) {
+          setState({
+            thumbnailUrl: cachedImage.value.thumbnailUrl || cachedImage.value.url,
+            hiResUrl: cachedImage.value.url,
+            status: 'loaded',
+            source: cachedImage.value.source,
+          });
+          // Even if we have a cached image, we might want to stale-while-revalidate 
+          // if it's very old? For now, trust the cache to avoid noise.
+          return;
+        }
+      } catch (e) {
+        // IDB failed, proceed to next layers
       }
 
-      // Layer 2: Service Worker Cache (binary)
-      // ROBUSTNESS: Enhanced SW cache checking with better validation
-      if ('serviceWorker' in navigator && navigator.serviceWorker.controller) {
-        try {
-          // Try to get image from any known source URL
-          const potentialUrls: string[] = [];
-          
-          // Add fact's imageUrl if available
-          if (fact.imageUrl) {
-            potentialUrls.push(fact.imageUrl);
-          }
-          
-          // Try to construct Wikimedia URL from fact title
-          if (fact.name || fact.title) {
-            const wikiTitle = (fact.name || fact.title).replace(/\s+/g, '_');
-            potentialUrls.push(`https://upload.wikimedia.org/wikipedia/commons/thumb/`);
-          }
-          
-          // Try each potential URL
-          for (const url of potentialUrls) {
-            try {
-              const swResponse = await fetch(url, { 
-                cache: 'force-cache',
-                signal: AbortSignal.timeout(1000), // 1s timeout for SW cache
-              });
-              
-              // Validate it's actually an image
-              const contentType = swResponse.headers.get('content-type');
-              if (swResponse.ok && contentType && contentType.startsWith('image/')) {
-                // Validate image size from headers
-                const contentLength = swResponse.headers.get('content-length');
-                if (contentLength) {
-                  const size = parseInt(contentLength, 10);
-                  if (size > 2 * 1024 * 1024) continue; // Skip if > 2MB
-                }
-                
-                const metadata: ImageMetadata = {
-                  url: swResponse.url,
-                  source: 'wikimedia',
-                  cachedAt: Date.now(),
-                  mimeType: contentType,
-                };
-                
-                setThumbnailUrl(metadata.url);
-                setHiResUrl(metadata.url);
-                setStatus('loaded');
-                setSource(metadata.source);
-                
-                // Cache in IDB (non-blocking)
-                setImage(fact.category, slug, metadata).catch((idbError) => {
-                  console.warn('Failed to cache image in IDB:', idbError);
-                });
-                return;
-              }
-            } catch (swError) {
-              // Continue to next URL
-              continue;
-            }
-          }
-        } catch (swError) {
-          // SW cache miss or error, continue to next layer
-          // Don't log - this is expected when SW doesn't have the image
+      if (signal.aborted) return;
+
+      // Layer 2 & 3: Service Worker & Network (Parallel)
+      // We start the network fetch immediately, but we also check SW cache
+      // If SW cache hits, we use it. If Network returns first or SW misses, we use Network.
+
+      try {
+         // Start Image Engine Search
+         const enginePromise = findImageForFact(fact, signal).then(async (metadata) => {
+             if (signal.aborted) return null;
+             if (metadata && metadata.url) {
+                // Cache this fresh result
+                await setImage(fact.category, slug, metadata);
+                return metadata;
+             }
+             return null;
+         });
+
+         const result = await enginePromise;
+         
+         if (signal.aborted) return;
+
+         if (result) {
+            setState({
+                thumbnailUrl: result.thumbnailUrl || result.url,
+                hiResUrl: result.url,
+                status: 'loaded',
+                source: result.source,
+            });
+         } else {
+             // Keep fallback
+         }
+
+      } catch (error) {
+        if (!signal.aborted) {
+           console.error('Image load error:', error);
+           // Keep fallback state, maybe update status to 'error' if strictly needed,
+           // but 'fallback' is usually better UX than 'error'
         }
       }
+    };
 
-      // Layer 3: Fresh network fetch (via imageEngine)
-      // This is async and non-blocking
-      const imageMetadata = await findImageForFact(fact);
-      if (imageMetadata && imageMetadata.url) {
-        setThumbnailUrl(imageMetadata.thumbnailUrl || imageMetadata.url);
-        setHiResUrl(imageMetadata.url);
-        setStatus('loaded');
-        setSource(imageMetadata.source);
-        
-        // Cache in IDB
-        await setImage(fact.category, slug, imageMetadata);
-        return;
-      }
+    load();
 
-      // Layer 4: Fallback static icon per category
-      // Already set above, no change needed
-      setStatus('fallback');
-      setSource('fallback-icon');
-    } catch (error) {
-      console.error('Image load error:', error);
-      setStatus('error');
-      // Still show fallback
-    }
-  }, [fact, fallbackIcon]);
-
-  useEffect(() => {
-    loadImage();
-  }, [loadImage]);
+    return () => {
+      controller.abort();
+    };
+  }, [fact.id, fact.title, fact.category, fallbackIcon]); // Minimized dependencies
 
   return {
-    thumbnailUrl,
-    hiResUrl,
-    status,
-    source,
+    ...state,
     fallbackIcon,
   };
 }

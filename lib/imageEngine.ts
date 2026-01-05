@@ -24,6 +24,9 @@ async function retryWithBackoff<T>(
     try {
       return await fn();
     } catch (error) {
+     if (error instanceof Error && error.name === 'AbortError') {
+        throw error; // Convert to null outside or handle
+      }
       if (attempt === maxRetries) {
         return null;
       }
@@ -158,11 +161,19 @@ function scoreCandidate(candidate: ImageCandidate, fact: Fact): number {
 /**
  * Enhanced Wikimedia image fetch with retry and better search
  */
-async function fetchWikimediaImage(keyword: string): Promise<ImageCandidate | null> {
+async function fetchWikimediaImage(keyword: string, signal?: AbortSignal): Promise<ImageCandidate | null> {
   return retryWithBackoff(async () => {
     try {
+      if (signal?.aborted) throw new Error('Aborted');
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), API_TIMEOUT);
+      
+      // Link external signal to internal controller if possible, 
+      // or just check signal before fetch.
+      // Since we can't easily link signals in older environments, we check signal state.
+      if (signal) {
+          signal.addEventListener('abort', () => controller.abort());
+      }
 
       // Try multiple search strategies for better results
       const searchStrategies = [
@@ -246,11 +257,16 @@ async function fetchWikimediaImage(keyword: string): Promise<ImageCandidate | nu
  * Enhanced NASA Images API fetch with best practices
  * Uses proper query parameters, media_type filtering, and better result selection
  */
-async function fetchNASAImage(keyword: string): Promise<ImageCandidate | null> {
+async function fetchNASAImage(keyword: string, signal?: AbortSignal): Promise<ImageCandidate | null> {
   return retryWithBackoff(async () => {
     try {
+      if (signal?.aborted) throw new Error('Aborted');
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), API_TIMEOUT);
+      
+      if (signal) {
+          signal.addEventListener('abort', () => controller.abort());
+      }
 
       // Best practice: Use media_type=image, page_size for pagination, year_start for relevance
       // NASA API best practice: Use specific query parameters for better results
@@ -398,11 +414,16 @@ async function fetchCommonsImageUrl(imageName: string, signal: AbortSignal): Pro
  * Search Wikimedia Commons directly using generator=search (best practice)
  * This is more efficient than searching Wikipedia first
  */
-async function fetchWikimediaCommonsImage(keyword: string): Promise<ImageCandidate | null> {
+async function fetchWikimediaCommonsImage(keyword: string, signal?: AbortSignal): Promise<ImageCandidate | null> {
   return retryWithBackoff(async () => {
     try {
+      if (signal?.aborted) throw new Error('Aborted');
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), API_TIMEOUT);
+
+      if (signal) {
+          signal.addEventListener('abort', () => controller.abort());
+      }
 
       // Best practice: Use generator=search with gsrsearch for Commons search
       // Use iiprop=url|size|mime for comprehensive image info
@@ -465,10 +486,15 @@ async function fetchWikimediaCommonsImage(keyword: string): Promise<ImageCandida
 /**
  * Fetch image from Wikidata P18 property
  */
-async function fetchWikidataImage(keyword: string): Promise<ImageCandidate | null> {
+async function fetchWikidataImage(keyword: string, signal?: AbortSignal): Promise<ImageCandidate | null> {
   try {
+    if (signal?.aborted) return null;
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), API_TIMEOUT);
+    
+    if (signal) {
+        signal.addEventListener('abort', () => controller.abort());
+    }
 
     // Search for entity
     const searchUrl = `https://www.wikidata.org/w/api.php?action=wbsearchentities&search=${encodeURIComponent(keyword)}&language=en&format=json&origin=*`;
@@ -537,11 +563,16 @@ async function fetchWikidataImage(keyword: string): Promise<ImageCandidate | nul
  * Enhanced Openverse API fetch with best practices
  * Uses proper query parameters, license filtering, size filtering, and pagination
  */
-async function fetchOpenverseImage(keyword: string): Promise<ImageCandidate | null> {
+async function fetchOpenverseImage(keyword: string, signal?: AbortSignal): Promise<ImageCandidate | null> {
   return retryWithBackoff(async () => {
     try {
+      if (signal?.aborted) throw new Error('Aborted');
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), API_TIMEOUT);
+
+      if (signal) {
+          signal.addEventListener('abort', () => controller.abort());
+      }
       
       // Best practice: Try different search terms for better results
       const searchTerms = [
@@ -851,8 +882,9 @@ function buildMetadata(
  * Enhanced main image engine: Find best image for a fact
  * Tries multiple keywords and strategies for best results
  */
-export async function findImageForFact(fact: Fact): Promise<ImageMetadata | null> {
+export async function findImageForFact(fact: Fact, signal?: AbortSignal): Promise<ImageMetadata | null> {
   try {
+    if (signal?.aborted) return null;
     // Extract keywords with multiple strategies
     const text = `${fact.title} ${fact.description || ''} ${fact.name || ''}`;
     const keywords = extractKeywords(text);
@@ -888,26 +920,26 @@ export async function findImageForFact(fact: Fact): Promise<ImageMetadata | null
       // Tier 1: High-quality sources (parallel fetch)
       // Best practice: Try multiple sources in parallel for speed
       [
-        () => fetchWikimediaImage(primaryKeyword),
-        () => fetchWikimediaCommonsImage(primaryKeyword), // Direct Commons search
-        () => fetchWikidataImage(primaryKeyword),
+        () => fetchWikimediaImage(primaryKeyword, signal),
+        () => fetchWikimediaCommonsImage(primaryKeyword, signal), // Direct Commons search
+        () => fetchWikidataImage(primaryKeyword, signal),
         // Try alternative keywords
         ...(keywordList.length > 1 ? [
-          () => fetchWikimediaImage(keywordList[1]),
-          () => fetchWikimediaCommonsImage(keywordList[1]),
+          () => fetchWikimediaImage(keywordList[1], signal),
+          () => fetchWikimediaCommonsImage(keywordList[1], signal),
         ] : []),
       ],
       // Tier 2: Category-specific sources
       fact.category === 'Space' || fact.category === 'Science'
         ? [
-            () => fetchNASAImage(primaryKeyword),
-            ...(keywordList.length > 1 ? [() => fetchNASAImage(keywordList[1])] : []),
+            () => fetchNASAImage(primaryKeyword, signal),
+            ...(keywordList.length > 1 ? [() => fetchNASAImage(keywordList[1], signal)] : []),
           ]
         : [],
       // Tier 3: Creative Commons sources
       [
-        () => fetchOpenverseImage(primaryKeyword),
-        ...(keywordList.length > 1 ? [() => fetchOpenverseImage(keywordList[1])] : []),
+        () => fetchOpenverseImage(primaryKeyword, signal),
+        ...(keywordList.length > 1 ? [() => fetchOpenverseImage(keywordList[1], signal)] : []),
       ],
       // Tier 4: Static category photos
       [

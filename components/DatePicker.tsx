@@ -226,7 +226,7 @@ export function DatePicker({
         <button
           type="button"
           role="tab"
-          aria-selected={selectionMode === 'single'}
+          aria-selected={selectionMode === 'single' ? true : false}
           aria-controls="single-date-panel"
           onClick={() => handleModeChange('single')}
           disabled={disabled}
@@ -241,7 +241,7 @@ export function DatePicker({
         <button
           type="button"
           role="tab"
-          aria-selected={selectionMode === 'range'}
+          aria-selected={selectionMode === 'range' ? true : false}
           aria-controls="range-date-panel"
           onClick={() => handleModeChange('range')}
           disabled={disabled}
