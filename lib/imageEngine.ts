@@ -974,3 +974,188 @@ export async function findImageForFact(fact: Fact, signal?: AbortSignal): Promis
   }
 }
 
+/**
+ * Fetch a gallery of images for a given keyword
+ * Aggregates results from multiple sources
+ */
+export async function fetchImageGallery(keyword: string, signal?: AbortSignal): Promise<ImageCandidate[]> {
+  try {
+    if (signal?.aborted) return [];
+    
+    // Create a controller to manage timeouts for the whole gallery fetch
+    // We give it a bit more time than a single image fetch since we're doing more
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 8000); // 8 seconds total
+    
+    if (signal) {
+        signal.addEventListener('abort', () => controller.abort());
+    }
+
+    // Run fetches in parallel - prioritization matters less here since we want variety
+    // But we still want good quality
+    const [nasaImages, wikimediaImages, openverseImages] = await Promise.all([
+      fetchNASAGalleryImages(keyword, controller.signal).catch(e => {
+        console.warn('NASA gallery fetch failed', e);
+        return [];
+      }),
+      fetchWikimediaGalleryImages(keyword, controller.signal).catch(e => {
+         console.warn('Wikimedia gallery fetch failed', e);
+         return [];
+      }),
+      fetchOpenverseGalleryImages(keyword, controller.signal).catch(e => {
+         console.warn('Openverse gallery fetch failed', e);
+         return [];
+      })
+    ]);
+
+    clearTimeout(timeoutId);
+
+    // Combine and deduplicate
+    const allImages = [...nasaImages, ...wikimediaImages, ...openverseImages];
+    const uniqueImages = new Map<string, ImageCandidate>();
+
+    allImages.forEach(img => {
+      // Use URL as unique key
+      if (img.url && !uniqueImages.has(img.url)) {
+        uniqueImages.set(img.url, img);
+      }
+    });
+
+    // Sort by score (quality) and shuffle slightly for variety? 
+    // For now, simple sort: width*height desc
+    return Array.from(uniqueImages.values())
+      .sort((a, b) => {
+         const scoreA = (a.width || 0) * (a.height || 0);
+         const scoreB = (b.width || 0) * (b.height || 0);
+         return scoreB - scoreA;
+      });
+
+  } catch (error) {
+    if (error instanceof Error && error.name !== 'AbortError') {
+        console.error('Gallery fetch error:', error);
+    }
+    return [];
+  }
+}
+
+/**
+ * Fetch multiple NASA images
+ */
+async function fetchNASAGalleryImages(keyword: string, signal: AbortSignal): Promise<ImageCandidate[]> {
+    try {
+        const url = `https://images-api.nasa.gov/search?q=${encodeURIComponent(keyword)}&media_type=image&page_size=25&year_start=1990`;
+        const response = await fetch(url, { signal, headers: { 'Accept': 'application/json' } });
+        if (!response.ok) return [];
+
+        const { data } = await safeJsonParse<{ collection?: { items?: any[] } }>(response);
+        if (!data?.collection?.items) return [];
+
+        const candidates: ImageCandidate[] = [];
+        const itemsToProcess = data.collection.items.slice(0, 8); // Limit to 8
+        
+        await Promise.all(itemsToProcess.map(async (item) => {
+             const href = item.href;
+             const metadata = item.data?.[0];
+             if (!href || typeof href !== 'string') return;
+
+             try {
+                const linksRes = await fetch(href, { signal });
+                if (!linksRes.ok) return;
+                const { data: links } = await safeJsonParse<any[]>(linksRes);
+                
+                // Find medium sized jpg if possible
+                const imageLink = links?.find((l: any) => l?.href?.match(/medium\.(jpg|jpeg)$/i)) 
+                                || links?.find((l: any) => l?.href?.match(/small\.(jpg|jpeg)$/i))
+                                || links?.find((l: any) => l?.render === 'image');
+
+                if (imageLink?.href) {
+                     candidates.push({
+                         url: imageLink.href,
+                         thumbnailUrl: imageLink.href, 
+                         source: 'nasa',
+                         width: metadata?.width,
+                         height: metadata?.height,
+                         license: 'Public Domain',
+                         score: 10,
+                         alt: metadata?.title || keyword
+                     });
+                }
+             } catch (e) { /* ignore individual failures */ }
+        }));
+
+        return candidates;
+    } catch (e) {
+        return [];
+    }
+}
+
+/**
+ * Fetch multiple Wikimedia images
+ */
+async function fetchWikimediaGalleryImages(keyword: string, signal: AbortSignal): Promise<ImageCandidate[]> {
+    try {
+        const searchUrl = `https://commons.wikimedia.org/w/api.php?action=query&format=json&generator=search&gsrsearch=${encodeURIComponent(keyword)}&gsrnamespace=6&gsrlimit=12&prop=imageinfo&iiprop=url|size|mime|thumbmime&iiurlwidth=400&origin=*`;
+        const response = await fetch(searchUrl, { signal });
+        if (!response.ok) return [];
+
+        const { data } = await safeJsonParse<any>(response);
+        if (!data?.query?.pages) return [];
+
+        const candidates: ImageCandidate[] = [];
+        Object.values(data.query.pages).forEach((page: any) => {
+            const info = page?.imageinfo?.[0];
+            if (info?.url && info.mime?.startsWith('image/')) {
+                 candidates.push({
+                     url: info.url,
+                     thumbnailUrl: info.thumburl || info.url,
+                     source: 'wikimedia',
+                     width: info.width,
+                     height: info.height,
+                     license: 'CC-BY-SA',
+                     score: 10,
+                     alt: page.title
+                 });
+            }
+        });
+        return candidates;
+    } catch (e) {
+        return [];
+    }
+}
+
+/**
+ * Fetch multiple Openverse images
+ */
+async function fetchOpenverseGalleryImages(keyword: string, signal: AbortSignal): Promise<ImageCandidate[]> {
+    try {
+        const url = `https://api.openverse.engineering/v1/images/?q=${encodeURIComponent(keyword)}&license=cc0,cc-by,cc-by-sa&size=medium,large&page_size=12`;
+        const response = await fetch(url, { 
+            signal,
+            headers: { 'Accept': 'application/json', 'User-Agent': 'DAY-LIGHT/3.0' }
+        });
+        if (!response.ok) return [];
+        
+        const { data } = await safeJsonParse<any>(response);
+        if (!data?.results) return [];
+
+        const candidates: ImageCandidate[] = [];
+        data.results.forEach((img: any) => {
+             if (img.url) {
+                 candidates.push({
+                     url: img.url,
+                     thumbnailUrl: img.thumbnail || img.url, // Openverse usually provides thumb
+                     source: 'openverse',
+                     width: img.width,
+                     height: img.height,
+                     license: 'Creative Commons',
+                     score: 10,
+                     alt: img.title
+                 });
+             }
+        });
+        return candidates;
+    } catch (e) {
+        return [];
+    }
+}
+

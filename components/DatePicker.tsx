@@ -226,7 +226,7 @@ export function DatePicker({
         <button
           type="button"
           role="tab"
-          aria-selected={selectionMode === 'single' ? true : false}
+          aria-selected={selectionMode === 'single' ? true : undefined}
           aria-controls="single-date-panel"
           onClick={() => handleModeChange('single')}
           disabled={disabled}
@@ -241,7 +241,7 @@ export function DatePicker({
         <button
           type="button"
           role="tab"
-          aria-selected={selectionMode === 'range' ? true : false}
+          aria-selected={selectionMode === 'range' ? true : undefined}
           aria-controls="range-date-panel"
           onClick={() => handleModeChange('range')}
           disabled={disabled}
@@ -274,7 +274,7 @@ export function DatePicker({
             min={minDateAttr}
             max={maxDateAttr}
             disabled={disabled}
-            aria-invalid={!!errors.singleDate}
+            aria-invalid={errors.singleDate ? true : undefined}
             aria-describedby={errors.singleDate ? 'single-date-error' : undefined}
             className={`w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-800 dark:border-gray-600 dark:text-white ${
               errors.singleDate ? 'border-red-500' : 'border-gray-300'
@@ -308,7 +308,7 @@ export function DatePicker({
               min={minDateAttr}
               max={maxDateAttr}
               disabled={disabled}
-              aria-invalid={!!errors.startDate}
+              aria-invalid={errors.startDate ? true : undefined}
               aria-describedby={errors.startDate ? 'start-date-error' : undefined}
               className={`w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-800 dark:border-gray-600 dark:text-white ${
                 errors.startDate ? 'border-red-500' : 'border-gray-300'
@@ -333,7 +333,7 @@ export function DatePicker({
               min={startDate || minDateAttr}
               max={maxDateAttr}
               disabled={disabled}
-              aria-invalid={!!errors.endDate}
+              aria-invalid={errors.endDate ? true : undefined}
               aria-describedby={errors.endDate ? 'end-date-error' : undefined}
               className={`w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-800 dark:border-gray-600 dark:text-white ${
                 errors.endDate ? 'border-red-500' : 'border-gray-300'

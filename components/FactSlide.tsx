@@ -5,7 +5,9 @@ import { motion } from 'framer-motion';
 import type { Fact } from '@/types/fact';
 import { ImageLayer } from './ImageLayer';
 import { FactOverlay } from './FactOverlay';
+import { ImageGallery } from './ImageGallery';
 import { useImageForFact } from '@/hooks/useImageForFact';
+import { useFactImages } from '@/hooks/useFactImages';
 
 interface FactSlideProps {
   fact: Fact;
@@ -26,8 +28,21 @@ export function FactSlide({
 }: FactSlideProps) {
   const [isExpanded, setIsExpanded] = useState(false);
   const { hiResUrl, fallbackIcon } = useImageForFact(fact);
+  const { 
+    images: galleryImages, 
+    isLoading: galleryLoading, 
+    error: galleryError, 
+    fetchGallery, 
+    isOpen: isGalleryOpen, 
+    setIsOpen: setGalleryOpen 
+  } = useFactImages(fact);
 
   const imageUrl = hiResUrl || fallbackIcon;
+
+  const handleGalleryOpen = () => {
+    setGalleryOpen(true);
+    fetchGallery();
+  };
 
   return (
     <motion.div
@@ -57,6 +72,16 @@ export function FactSlide({
         fact={fact}
         isExpanded={isExpanded}
         onExpand={() => setIsExpanded(!isExpanded)}
+        onGalleryOpen={handleGalleryOpen}
+      />
+
+      <ImageGallery
+        isOpen={isGalleryOpen}
+        onClose={() => setGalleryOpen(false)}
+        images={galleryImages}
+        isLoading={galleryLoading}
+        error={galleryError}
+        title={fact.title || fact.category}
       />
     </motion.div>
   );
