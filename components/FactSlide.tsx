@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, memo } from 'react';
 import { motion } from 'framer-motion';
 import type { Fact } from '@/types/fact';
 import { ImageLayer } from './ImageLayer';
@@ -16,15 +16,17 @@ interface FactSlideProps {
   onEnter?: () => void;
   onExit?: () => void;
   priority?: boolean;
+  shouldPreloadGallery?: boolean;
 }
 
-export function FactSlide({
+export const FactSlide = memo(function FactSlide({
   fact,
   index,
   isActive,
   onEnter,
   onExit,
   priority = false,
+  shouldPreloadGallery = false,
 }: FactSlideProps) {
   const [isExpanded, setIsExpanded] = useState(false);
   const { hiResUrl, fallbackIcon } = useImageForFact(fact);
@@ -35,7 +37,7 @@ export function FactSlide({
     fetchGallery, 
     isOpen: isGalleryOpen, 
     setIsOpen: setGalleryOpen 
-  } = useFactImages(fact);
+  } = useFactImages(fact, shouldPreloadGallery);
 
   const imageUrl = hiResUrl || fallbackIcon;
 
@@ -85,5 +87,5 @@ export function FactSlide({
       />
     </motion.div>
   );
-}
+});
 

@@ -24,7 +24,7 @@ interface UseFactImagesResult {
 // Simple in-memory cache to avoid refetching gallery for same session
 const galleryCache = new Map<string, GalleryImage[]>();
 
-export function useFactImages(fact: Fact): UseFactImagesResult {
+export function useFactImages(fact: Fact, shouldPreload: boolean = false): UseFactImagesResult {
   const [images, setImages] = useState<GalleryImage[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -34,7 +34,7 @@ export function useFactImages(fact: Fact): UseFactImagesResult {
   const key = normalizeKey(fact.title || fact.id);
 
   const fetchGallery = useCallback(async () => {
-    if (hasFetched && images.length > 0) return;
+    if (images.length > 0) return; // Don't refetch if we have images
     if (galleryCache.has(key)) {
         setImages(galleryCache.get(key)!);
         setHasFetched(true);
@@ -70,7 +70,26 @@ export function useFactImages(fact: Fact): UseFactImagesResult {
     } finally {
       setIsLoading(false);
     }
-  }, [fact.title, fact.category, key, hasFetched, images.length]);
+  }, [fact.title, fact.category, key, images.length]);
+
+  // Background preloading logic
+  useEffect(() => {
+    if (shouldPreload && !hasFetched && !isLoading && !galleryCache.has(key)) {
+      // Small delay to prioritize main image LCP
+      const timer = setTimeout(() => {
+        fetchGallery();
+      }, 2000); 
+      return () => clearTimeout(timer);
+    }
+  }, [shouldPreload, hasFetched, isLoading, key, fetchGallery]);
+
+  // Return cached result immediately if available (even before effect runs)
+  useEffect(() => {
+      if (galleryCache.has(key) && images.length === 0) {
+          setImages(galleryCache.get(key)!);
+          setHasFetched(true);
+      }
+  }, [key, images.length]);
 
   // Preload if user hovers? (Optional optimization)
   

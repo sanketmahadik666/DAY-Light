@@ -978,12 +978,14 @@ export async function findImageForFact(fact: Fact, signal?: AbortSignal): Promis
  * Fetch a gallery of images for a given keyword
  * Aggregates results from multiple sources
  */
+/**
+ * Fetch a gallery of images for a given keyword
+ * Aggregates results from multiple sources
+ */
 export async function fetchImageGallery(keyword: string, signal?: AbortSignal): Promise<ImageCandidate[]> {
   try {
     if (signal?.aborted) return [];
     
-    // Create a controller to manage timeouts for the whole gallery fetch
-    // We give it a bit more time than a single image fetch since we're doing more
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 8000); // 8 seconds total
     
@@ -991,35 +993,43 @@ export async function fetchImageGallery(keyword: string, signal?: AbortSignal): 
         signal.addEventListener('abort', () => controller.abort());
     }
 
-    // Run fetches in parallel - prioritization matters less here since we want variety
-    // But we still want good quality
-    const [nasaImages, wikimediaImages, openverseImages] = await Promise.all([
-      fetchNASAGalleryImages(keyword, controller.signal).catch(e => {
-        console.warn('NASA gallery fetch failed', e);
-        return [];
-      }),
-      fetchWikimediaGalleryImages(keyword, controller.signal).catch(e => {
-         console.warn('Wikimedia gallery fetch failed', e);
-         return [];
-      }),
-      fetchOpenverseGalleryImages(keyword, controller.signal).catch(e => {
-         console.warn('Openverse gallery fetch failed', e);
-         return [];
-      })
-    ]);
+    // STRATEGY OPTIMIZATION:
+    // User reported that previous gallery fetch was disappointing. 
+    // We now use the main engine's robust keyword extraction to try multiple angles.
+    const keywords = extractKeywords(keyword);
+    // Ensure the original keyword is included first if it wasn't extracted
+    if (!keywords.includes(keyword)) {
+      keywords.unshift(keyword);
+    }
+    // Also try splitting complex titles?
+    if (keyword.split(' ').length > 3) {
+      keywords.push(keyword.split(' ').slice(0, 2).join(' ')); // Try shorter phrase
+    }
 
-    clearTimeout(timeoutId);
-
-    // Combine and deduplicate
-    const allImages = [...nasaImages, ...wikimediaImages, ...openverseImages];
+    const allImages: ImageCandidate[] = [];
     const uniqueImages = new Map<string, ImageCandidate>();
 
-    allImages.forEach(img => {
-      // Use URL as unique key
-      if (img.url && !uniqueImages.has(img.url)) {
-        uniqueImages.set(img.url, img);
-      }
-    });
+    // Parallel fetch for primary keyword
+    const fetchForKeyword = async (term: string) => {
+      const [nasa, wiki, open] = await Promise.all([
+         fetchNASAGalleryImages(term, controller.signal).catch(() => []),
+         fetchWikimediaGalleryImages(term, controller.signal).catch(() => []),
+         fetchOpenverseGalleryImages(term, controller.signal).catch(() => [])
+      ]);
+      return [...nasa, ...wiki, ...open];
+    };
+
+    // Try primary strategy
+    const primaryResults = await fetchForKeyword(keywords[0]);
+    primaryResults.forEach(img => uniqueImages.set(img.url, img));
+
+    // If results are thin (< 5), try secondary keywords immediately
+    if (uniqueImages.size < 5 && keywords.length > 1) {
+       const secondaryResults = await fetchForKeyword(keywords[1]);
+       secondaryResults.forEach(img => uniqueImages.set(img.url, img));
+    }
+
+    clearTimeout(timeoutId);
 
     // Sort by score (quality) and shuffle slightly for variety? 
     // For now, simple sort: width*height desc
@@ -1051,7 +1061,7 @@ async function fetchNASAGalleryImages(keyword: string, signal: AbortSignal): Pro
         if (!data?.collection?.items) return [];
 
         const candidates: ImageCandidate[] = [];
-        const itemsToProcess = data.collection.items.slice(0, 8); // Limit to 8
+        const itemsToProcess = data.collection.items.slice(0, 20); // Increased limit to 20
         
         await Promise.all(itemsToProcess.map(async (item) => {
              const href = item.href;
@@ -1094,7 +1104,7 @@ async function fetchNASAGalleryImages(keyword: string, signal: AbortSignal): Pro
  */
 async function fetchWikimediaGalleryImages(keyword: string, signal: AbortSignal): Promise<ImageCandidate[]> {
     try {
-        const searchUrl = `https://commons.wikimedia.org/w/api.php?action=query&format=json&generator=search&gsrsearch=${encodeURIComponent(keyword)}&gsrnamespace=6&gsrlimit=12&prop=imageinfo&iiprop=url|size|mime|thumbmime&iiurlwidth=400&origin=*`;
+        const searchUrl = `https://commons.wikimedia.org/w/api.php?action=query&format=json&generator=search&gsrsearch=${encodeURIComponent(keyword)}&gsrnamespace=6&gsrlimit=25&prop=imageinfo&iiprop=url|size|mime|thumbmime&iiurlwidth=400&origin=*`; // Increased limit to 25
         const response = await fetch(searchUrl, { signal });
         if (!response.ok) return [];
 
@@ -1128,7 +1138,7 @@ async function fetchWikimediaGalleryImages(keyword: string, signal: AbortSignal)
  */
 async function fetchOpenverseGalleryImages(keyword: string, signal: AbortSignal): Promise<ImageCandidate[]> {
     try {
-        const url = `https://api.openverse.engineering/v1/images/?q=${encodeURIComponent(keyword)}&license=cc0,cc-by,cc-by-sa&size=medium,large&page_size=12`;
+        const url = `https://api.openverse.engineering/v1/images/?q=${encodeURIComponent(keyword)}&license=cc0,cc-by,cc-by-sa&size=medium,large&page_size=25`; // Increased limit to 25
         const response = await fetch(url, { 
             signal,
             headers: { 'Accept': 'application/json', 'User-Agent': 'DAY-LIGHT/3.0' }

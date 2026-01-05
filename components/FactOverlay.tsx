@@ -46,8 +46,9 @@ export function FactOverlay({ fact, isExpanded, onExpand, onGalleryOpen }: FactO
           <button
             onClick={onExpand}
             className="px-4 py-2 bg-white/20 backdrop-blur-sm rounded-lg hover:bg-white/30 transition-colors"
-            aria-expanded={isExpanded}
+            aria-expanded={isExpanded ? true : undefined}
             aria-label={isExpanded ? 'Collapse description' : 'Expand description'}
+            target-lint-error-ids="a216cdd8-7b4c-4a77-8901-ab4b0007f5c9"
           >
             {isExpanded ? 'Less' : 'More'}
           </button>

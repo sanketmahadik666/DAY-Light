@@ -83,7 +83,6 @@ export function GalleryScroller({
     <div
       ref={containerRef}
       className="snap-y snap-mandatory overflow-y-auto h-screen"
-      style={{ scrollSnapType: 'y mandatory' }}
     >
       {slides.map((fact, index) => {
         // Only render visible slides + prefetch range
@@ -98,6 +97,7 @@ export function GalleryScroller({
             index={index}
             isActive={index === currentIndex}
             priority={index === currentIndex || index === currentIndex + 1}
+            shouldPreloadGallery={Math.abs(index - currentIndex) <= 1}
           />
         );
       })}
