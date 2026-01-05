@@ -14,6 +14,23 @@ describe('imageEngine', () => {
     jest.clearAllMocks();
   });
 
+// Mock apiSanitizer
+jest.mock('@/lib/apiSanitizer', () => ({
+  safeJsonParse: jest.fn(async (response) => {
+      if (response && response.text) {
+          try {
+             const text = await response.text();
+             const data = JSON.parse(text);
+             return { data, error: null };
+          } catch (e) {
+             return { data: null, error: e };
+          }
+      }
+      return { data: null, error: 'Invalid response' };
+  }),
+  isRateLimited: jest.fn().mockReturnValue(false),
+}));
+
   describe('validateImage', () => {
     it('should accept valid image URLs', async () => {
       mockFetch.mockResolvedValueOnce({

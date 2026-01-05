@@ -10,6 +10,23 @@ import { Fact } from '@/types/fact';
 // Mock global fetch
 global.fetch = jest.fn();
 
+// Mock apiSanitizer
+jest.mock('@/lib/apiSanitizer', () => ({
+  safeJsonParse: jest.fn(async (response) => {
+      // Mock safeJsonParse behavior
+      if (response && response.json) {
+          try {
+             const data = await response.json();
+             return { data, error: null };
+          } catch (e) {
+             return { data: null, error: e };
+          }
+      }
+      return { data: null, error: 'Invalid response' };
+  }),
+  isRateLimited: jest.fn().mockReturnValue(false),
+}));
+
 describe('DataSources', () => {
   beforeEach(() => {
     jest.clearAllMocks();

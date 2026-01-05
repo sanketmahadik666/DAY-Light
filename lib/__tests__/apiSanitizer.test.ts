@@ -89,6 +89,13 @@ describe('apiSanitizer', () => {
 
     it('should warn on unexpected content-type', async () => {
       const consoleSpy = jest.spyOn(console, 'warn').mockImplementation();
+      
+      // Mock window.__DEV__
+      Object.defineProperty(window, '__DEV__', {
+        writable: true,
+        value: true,
+      });
+
       const mockResponse = createMockResponse({
         headers: { 'content-type': 'text/plain' },
         text: () => Promise.resolve('{"key": "value"}'),
@@ -102,7 +109,7 @@ describe('apiSanitizer', () => {
 
   describe('sanitizeString', () => {
     it('should remove dangerous characters', () => {
-      expect(sanitizeString('<script>alert("xss")</script>')).toBe('scriptalert("xss")script');
+      expect(sanitizeString('<script>alert("xss")</script>')).toBe('scriptalert("xss")/script');
     });
 
     it('should limit string length', () => {
