@@ -56,7 +56,7 @@ export const FactSchema = z.object({
   name: z.string().optional(),
   date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/), // YYYY-MM-DD
   category: CategorySchema,
-  year: z.number().int().positive().optional(),
+  year: z.number().int().optional(),
   source: z.string().optional(),
   sourceUrl: z.string().url().optional(),
   imageUrl: z.string().url().optional(),

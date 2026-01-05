@@ -15,6 +15,8 @@ export const metadata: Metadata = {
   description: 'A cinematic, offline-capable gallery of historical facts',
 };
 
+import { RippleEffect } from '@/components/RippleEffect';
+
 export default function RootLayout({
   children,
 }: {
@@ -24,6 +26,7 @@ export default function RootLayout({
     <html lang="en" suppressHydrationWarning className={inter.variable}>
       <body className={inter.variable}>
         <SWRegister />
+        <RippleEffect />
         {children}
       </body>
     </html>
