@@ -203,12 +203,12 @@ export async function setImage(
 }
 
 /**
- * Prune images using LRU if we exceed 300 entries
+ * Prune images using LRU if we exceed 100 entries (Aggressive cleanup)
  */
 async function pruneImagesIfNeeded(db: IDBPDatabase<DaylightDB>): Promise<void> {
   try {
     const count = await db.count('images');
-    if (count <= 300) return;
+    if (count <= 100) return;
 
     // Get all images sorted by last accessed
     const allImages = await db.getAllFromIndex('images', 'by-last-accessed');
@@ -216,8 +216,8 @@ async function pruneImagesIfNeeded(db: IDBPDatabase<DaylightDB>): Promise<void> 
     // Sort by last accessed (oldest first)
     allImages.sort((a, b) => a.lastAccessed - b.lastAccessed);
 
-    // Delete oldest entries until we're under 300
-    const toDelete = allImages.slice(0, count - 300);
+    // Delete oldest entries until we're under 100
+    const toDelete = allImages.slice(0, count - 100);
     for (const entry of toDelete) {
       await db.delete('images', entry.key);
     }

@@ -24,8 +24,9 @@ export function GalleryScroller({
   const prevSlidesLengthRef = useRef<number>(slides.length);
 
   useEffect(() => {
-    const start = Math.max(0, currentIndex - 3);
-    const end = Math.min(slides.length, currentIndex + 4);
+    // Aggressive memory cleanup: Keep only current + prefetch range
+    const start = Math.max(0, currentIndex - 2);
+    const end = Math.min(slides.length, currentIndex + 2);
     setVisibleRange({ start, end });
   }, [currentIndex, slides.length]);
 
