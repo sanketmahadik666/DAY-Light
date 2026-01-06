@@ -66,10 +66,10 @@ export function ImageLayer({
       <motion.div
         className="absolute inset-0"
         animate={{
-          scale: isActive ? 1.02 : 1,
+          scale: isActive ? 1.015 : 1,
         }}
         transition={{
-          duration: 0.5,
+          duration: 0.8,
           ease: 'linear',
         }}
       >

@@ -52,13 +52,14 @@ export const FactSlide = memo(function FactSlide({
       style={{ 
         zIndex: 1, // Ensure slides are below modal (z-100) and button (z-60)
         position: 'relative', // Ensure proper stacking context
+        willChange: 'opacity, transform',
       }}
       role="group"
       aria-roledescription="slide"
       initial={false}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
-      transition={{ duration: 0.15 }} // Faster transition to prevent overlap
+      transition={{ duration: 0.1, ease: 'linear' }}
       onViewportEnter={onEnter}
       onViewportLeave={onExit}
     >

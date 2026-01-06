@@ -12,11 +12,12 @@ interface FactOverlayProps {
 
 export function FactOverlay({ fact, isExpanded, onExpand, onGalleryOpen }: FactOverlayProps) {
   return (
-    <div className="relative z-10 max-w-[900px] mx-auto px-6 py-12 text-white">
+    <div className="relative z-10 max-w-[900px] mx-auto px-6 py-12 text-white pointer-events-none">
       <motion.div
-        initial={{ opacity: 0, y: 30 }}
+        initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.3, ease: 'easeOut' }}
+        transition={{ duration: 0.2, ease: 'easeOut' }}
+        className="pointer-events-auto"
       >
         <h1 className="text-4xl md:text-5xl font-serif font-bold mb-4 min-h-[1.2em]">
           {fact.title}
