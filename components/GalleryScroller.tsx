@@ -21,14 +21,22 @@ export function GalleryScroller({
 }: GalleryScrollerProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [visibleRange, setVisibleRange] = useState({ start: 0, end: 10 });
+  const [scrollVelocity, setScrollVelocity] = useState(0);
   const prevSlidesLengthRef = useRef<number>(slides.length);
+  const lastScrollState = useRef({ top: 0, time: Date.now() });
 
   useEffect(() => {
-    // Aggressive memory cleanup: Keep only current + prefetch range
+    // Dynamic Preloading based on Velocity
+    // Base: 2 slides
+    // fast scroll: up to 5 slides
+    const velocityFactor = Math.min(3, Math.round(scrollVelocity * 5)); 
+    const prefetchCount = 2 + velocityFactor;
+
     const start = Math.max(0, currentIndex - 2);
-    const end = Math.min(slides.length, currentIndex + 2);
+    const end = Math.min(slides.length, currentIndex + prefetchCount);
+    
     setVisibleRange({ start, end });
-  }, [currentIndex, slides.length]);
+  }, [currentIndex, slides.length, scrollVelocity]);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -36,6 +44,19 @@ export function GalleryScroller({
 
     const handleScroll = () => {
       const scrollTop = container.scrollTop;
+      const now = Date.now();
+      const timeDelta = now - lastScrollState.current.time;
+      
+      // Update velocity every 100ms or so to avoid jitter
+      if (timeDelta > 50) {
+        const dist = Math.abs(scrollTop - lastScrollState.current.top);
+        const velocity = dist / timeDelta; // px/ms
+        setScrollVelocity(velocity);
+        
+        lastScrollState.current = { top: scrollTop, time: now };
+      }
+
+      // ... existing index calculation ...
       const slideHeight = window.innerHeight;
       const newIndex = Math.round(scrollTop / slideHeight);
       
@@ -45,41 +66,11 @@ export function GalleryScroller({
     };
 
     container.addEventListener('scroll', handleScroll, { passive: true });
-    return () => container.removeEventListener('scroll', handleScroll);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentIndex, slides.length]); // onIndexChange is stable from useCallback, don't need in deps
 
-  // Scroll to current index
-  useEffect(() => {
-    const container = containerRef.current;
-    if (!container) return;
-
-    const slideHeight = window.innerHeight;
-    
-    // CRITICAL: If slides array changed (new date/facts), ALWAYS jump instantly
-    // This prevents overlap during date changes
-    const slidesChanged = prevSlidesLengthRef.current !== slides.length;
-    const isAtTop = container.scrollTop === 0;
-    
-    // Always use 'auto' (instant) if slides changed or at top
-    // Only use 'smooth' for normal navigation within same slides
-    const behavior: ScrollBehavior = slidesChanged || isAtTop
-      ? 'auto'
-      : 'smooth';
-
-    // Use requestAnimationFrame to ensure DOM is ready
-    requestAnimationFrame(() => {
-      if (container) {
-        container.scrollTo({
-          top: currentIndex * slideHeight,
-          behavior,
-        });
-      }
-    });
-
-    // Update previous length for next render
-    prevSlidesLengthRef.current = slides.length;
-  }, [currentIndex, slides.length]);
+    return () => {
+      container.removeEventListener('scroll', handleScroll);
+    };
+  }, [currentIndex, slides.length, onIndexChange]);
 
   return (
     <div
@@ -87,20 +78,34 @@ export function GalleryScroller({
       className="snap-y snap-mandatory overflow-y-auto h-screen"
     >
       {slides.map((fact, index) => {
-        // Only render visible slides + prefetch range
+        // Render window
         const isVisible = index >= visibleRange.start && index <= visibleRange.end;
         
+        // Priority for LCP: Current and Next
+        const isPriority = index === currentIndex || index === currentIndex + 1;
+
         return (
           <div
             key={fact.id}
-            className={`w-full h-full ${isVisible ? 'block' : 'hidden'}`}
+            className="w-full h-full snap-start"
+            // Use data-attribute for potential debugging/CSS
+            data-index={index}
+            data-state={index === currentIndex ? 'active' : 'inactive'}
           >
-            <MemoizedFactSlide
-              fact={fact}
-              index={index}
-              isActive={index === currentIndex}
-              priority={index === currentIndex || index === currentIndex + 1}
-            />
+            {isVisible ? (
+              <MemoizedFactSlide
+                fact={fact}
+                index={index}
+                isActive={index === currentIndex}
+                priority={isPriority}
+                shouldPreloadGallery={index === currentIndex} // Only preload gallery for active slide
+              />
+            ) : (
+               // Empty placeholder to maintain scroll height
+               // This allows React to unmount the heavy FactSlide component
+               // effectively cleaning up memory and cancelling active requests for distant slides
+               null 
+            )}
           </div>
         );
       })}

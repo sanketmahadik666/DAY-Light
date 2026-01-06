@@ -1,22 +1,34 @@
 /**
  * IndexedDB cache utilities with LRU eviction and TTL management
+ * Now supports gzip compression via pako
  */
 
 import { openDB, DBSchema, IDBPDatabase } from 'idb';
+import pako from 'pako';
 import type { FactEntry, ImageCacheEntry, MetaStore, RandomPool } from '@/types/fact';
 
 const DB_NAME = 'daylight-v3';
 const DB_VERSION = 1;
 
+// Wrapper for compressed data
+interface CompressedData {
+  compressed: true;
+  data: Uint8Array; // Compressed JSON string
+  originalSize: number;
+}
+
+type StoredFactEntry = (FactEntry | (Omit<FactEntry, 'facts'> & { facts: never; compressedData: CompressedData })) & { key: string };
+type StoredImageEntry = ImageCacheEntry | (Omit<ImageCacheEntry, 'value'> & { value: never; compressedData: CompressedData });
+
 interface DaylightDB extends DBSchema {
   facts: {
     key: string; // format: "facts:YYYY-MM-DD"
-    value: FactEntry;
+    value: StoredFactEntry;
     indexes: { 'by-date': string };
   };
   images: {
     key: string; // format: "img:{category}:{slug}"
-    value: ImageCacheEntry;
+    value: StoredImageEntry;
     indexes: { 'by-category': string; 'by-last-accessed': number };
   };
   meta: {
@@ -26,6 +38,30 @@ interface DaylightDB extends DBSchema {
 }
 
 let dbInstance: IDBPDatabase<DaylightDB> | null = null;
+
+// --- Compression Helpers ---
+
+function compress<T>(data: T): CompressedData {
+  const json = JSON.stringify(data);
+  const compressed = pako.deflate(json);
+  return {
+    compressed: true,
+    data: compressed,
+    originalSize: json.length
+  };
+}
+
+function decompress<T>(data: CompressedData): T {
+  try {
+    const json = pako.inflate(data.data, { to: 'string' });
+    return JSON.parse(json) as T;
+  } catch (e) {
+    console.error('Decompression failed:', e);
+    throw new Error('Decompression failed');
+  }
+}
+
+// ---------------------------
 
 /**
  * Initialize IndexedDB
@@ -75,7 +111,7 @@ export async function healthCheck(): Promise<boolean> {
 }
 
 /**
- * Get fact entry for a date
+ * Get fact entry for a date (Transparent decompression)
  */
 export async function getFacts(date: string): Promise<FactEntry | null> {
   try {
@@ -94,7 +130,17 @@ export async function getFacts(date: string): Promise<FactEntry | null> {
       return null;
     }
 
-    return entry;
+    if ('compressedData' in entry && entry.compressedData) {
+      const decompressedFacts = decompress<FactEntry['facts']>(entry.compressedData);
+      return {
+        ...entry,
+        facts: decompressedFacts,
+        // Remove compression metadata from result
+      } as FactEntry;
+    }
+
+    // Legacy fallback (uncompressed)
+    return entry as FactEntry;
   } catch (error) {
     console.error(`Error getting facts for ${date}:`, error);
     return null;
@@ -102,19 +148,23 @@ export async function getFacts(date: string): Promise<FactEntry | null> {
 }
 
 /**
- * Set fact entry for a date
+ * Set fact entry for a date (Transparent compression)
  */
 export async function setFacts(date: string, facts: FactEntry['facts']): Promise<boolean> {
   try {
     const db = await initDB();
     const key = `facts:${date}`;
-    const entry: FactEntry & { key: string } = {
+    
+    const compressedFacts = compress(facts);
+
+    const entry: StoredFactEntry = {
       key,
       date,
-      facts,
+      compressedData: compressedFacts,
       cachedAt: Date.now(),
       ttl: 24 * 60 * 60 * 1000, // 24 hours
-    };
+    } as any; // Cast needed due to union complexity
+
     await db.put('facts', entry);
     return true;
   } catch (error) {
@@ -133,7 +183,7 @@ export async function setFacts(date: string, facts: FactEntry['facts']): Promise
 }
 
 /**
- * Get image cache entry
+ * Get image cache entry (Transparent decompression)
  */
 export async function getImage(
   category: string,
@@ -159,7 +209,15 @@ export async function getImage(
     entry.accessCount += 1;
     await db.put('images', entry);
 
-    return entry;
+    if ('compressedData' in entry && entry.compressedData) {
+      const decompressedValue = decompress<ImageCacheEntry['value']>(entry.compressedData);
+      return {
+        ...entry,
+        value: decompressedValue,
+      } as ImageCacheEntry;
+    }
+
+    return entry as ImageCacheEntry;
   } catch (error) {
     console.error(`Error getting image ${category}:${slug}:`, error);
     return null;
@@ -167,7 +225,112 @@ export async function getImage(
 }
 
 /**
- * Set image cache entry
+ * Prune images using Smart LRU
+ * - Limit: 200 images
+ * - Scoring: lastAccessed + (categoryBonus)
+ */
+async function pruneImagesIfNeeded(db: IDBPDatabase<DaylightDB>, activeCategory?: string): Promise<void> {
+  try {
+    const MAX_IMAGES = 200;
+    const count = await db.count('images');
+    
+    if (count <= MAX_IMAGES) return;
+
+    // Get all images
+    const allImages = await db.getAllFromIndex('images', 'by-last-accessed');
+    
+    // Calculate scores
+    const scoredImages = allImages.map(img => {
+      let score = img.lastAccessed;
+      if (activeCategory && img.category === activeCategory) {
+        score += 1000000000;
+      }
+      return { key: img.key, score };
+    });
+
+    // Sort by score ascending (lowest score first -> to be deleted)
+    scoredImages.sort((a, b) => a.score - b.score);
+
+    // Delete oldest entries until we're under the limit
+    const toDeleteCount = count - MAX_IMAGES;
+    if (toDeleteCount <= 0) return;
+
+    const toDelete = scoredImages.slice(0, toDeleteCount);
+    
+    // Batch delete
+    const tx = db.transaction('images', 'readwrite');
+    await Promise.all([
+      ...toDelete.map(item => tx.store.delete(item.key)),
+      tx.done
+    ]);
+    
+  } catch (error) {
+    console.error('Error pruning images:', error);
+  }
+}
+
+// --- Write Batching Logic ---
+
+interface QueueItem {
+  entry: any; // StoredImageEntry (using any to avoid union headaches)
+  category: string;
+}
+
+const WRITE_BATCH_SIZE = 10;
+const WRITE_BATCH_TIMEOUT = 500; // ms
+let writeQueue: QueueItem[] = [];
+let writeTimer: NodeJS.Timeout | null = null;
+let isFlushing = false;
+
+async function flushWriteQueue() {
+  if (writeQueue.length === 0) return;
+  if (isFlushing) return;
+
+  isFlushing = true;
+  const batch = [...writeQueue];
+  writeQueue = [];
+  
+  if (writeTimer) {
+    clearTimeout(writeTimer);
+    writeTimer = null;
+  }
+
+  try {
+    const db = await initDB();
+    const tx = db.transaction('images', 'readwrite');
+    
+    // Execute all puts
+    await Promise.all([
+      ...batch.map(item => tx.store.put(item.entry)),
+      tx.done
+    ]);
+
+    // Prune once per batch using the category of the most recent item
+    // This isn't perfect but good heuristic
+    if (batch.length > 0) {
+      const lastItem = batch[batch.length - 1];
+      await pruneImagesIfNeeded(db, lastItem.category);
+    }
+
+  } catch (error) {
+    console.error('Error flushing batch:', error);
+    // In a real app we might retry or requeue, but for cache we can drop
+  } finally {
+    isFlushing = false;
+    // If more items came in while flushing, schedule next
+    if (writeQueue.length > 0) {
+      triggerFlush();
+    }
+  }
+}
+
+function triggerFlush() {
+  if (writeTimer) return;
+  writeTimer = setTimeout(flushWriteQueue, WRITE_BATCH_TIMEOUT);
+}
+
+/**
+ * Set image cache entry (Batched High-Performance)
  */
 export async function setImage(
   category: string,
@@ -175,13 +338,14 @@ export async function setImage(
   value: ImageCacheEntry['value']
 ): Promise<boolean> {
   try {
-    const db = await initDB();
     const key = `img:${category}:${slug}`;
     const now = Date.now();
     
-    const entry: ImageCacheEntry = {
+    const compressedValue = compress(value);
+    
+    const entry: any = {
       key,
-      value,
+      compressedData: compressedValue,
       cachedAt: now,
       ttl: 30 * 24 * 60 * 60 * 1000, // 30 days
       accessCount: 1,
@@ -190,10 +354,19 @@ export async function setImage(
       slug,
     };
 
-    await db.put('images', entry);
+    // Add to queue
+    writeQueue.push({ entry, category });
 
-    // Check if we need to prune (max 300 entries)
-    await pruneImagesIfNeeded(db);
+    // Flush if full or schedule timer
+    if (writeQueue.length >= WRITE_BATCH_SIZE) {
+      // Force flush if we hit batch size
+      if (writeTimer) clearTimeout(writeTimer);
+      writeTimer = null;
+      // We don't await this, we return true immediately (Optimistic UI)
+      flushWriteQueue();
+    } else {
+      triggerFlush();
+    }
 
     return true;
   } catch (error) {
@@ -203,26 +376,24 @@ export async function setImage(
 }
 
 /**
- * Prune images using LRU if we exceed 100 entries (Aggressive cleanup)
+ * Get storage usage estimate
+ * Returns usage in bytes and percentage
  */
-async function pruneImagesIfNeeded(db: IDBPDatabase<DaylightDB>): Promise<void> {
+export async function getStorageUsage(): Promise<{ usage: number; quota: number; percent: number } | null> {
+  if (!navigator.storage || !navigator.storage.estimate) {
+    return null;
+  }
+
   try {
-    const count = await db.count('images');
-    if (count <= 100) return;
+    const estimate = await navigator.storage.estimate();
+    const usage = estimate.usage || 0;
+    const quota = estimate.quota || 0;
+    const percent = quota > 0 ? (usage / quota) * 100 : 0;
 
-    // Get all images sorted by last accessed
-    const allImages = await db.getAllFromIndex('images', 'by-last-accessed');
-    
-    // Sort by last accessed (oldest first)
-    allImages.sort((a, b) => a.lastAccessed - b.lastAccessed);
-
-    // Delete oldest entries until we're under 100
-    const toDelete = allImages.slice(0, count - 100);
-    for (const entry of toDelete) {
-      await db.delete('images', entry.key);
-    }
+    return { usage, quota, percent };
   } catch (error) {
-    console.error('Error pruning images:', error);
+    console.error('Error estimating storage:', error);
+    return null;
   }
 }
 

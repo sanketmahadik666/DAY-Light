@@ -21,8 +21,25 @@ interface UseFactImagesResult {
   setIsOpen: (isOpen: boolean) => void;
 }
 
-// Simple in-memory cache to avoid refetching gallery for same session
-const galleryCache = new Map<string, GalleryImage[]>();
+// Memory cache with TTL to prevent bloat
+// 5 minutes TTL
+const CACHE_TTL = 5 * 60 * 1000;
+
+interface CacheEntry {
+  data: GalleryImage[];
+  timestamp: number;
+}
+
+const galleryCache = new Map<string, CacheEntry>();
+
+function pruneCache() {
+  const now = Date.now();
+  for (const [key, entry] of galleryCache.entries()) {
+    if (now - entry.timestamp > CACHE_TTL) {
+      galleryCache.delete(key);
+    }
+  }
+}
 
 export function useFactImages(fact: Fact, shouldPreload: boolean = false): UseFactImagesResult {
   const [images, setImages] = useState<GalleryImage[]>([]);
@@ -35,10 +52,17 @@ export function useFactImages(fact: Fact, shouldPreload: boolean = false): UseFa
 
   const fetchGallery = useCallback(async () => {
     if (images.length > 0) return; // Don't refetch if we have images
+    
+    // Check cache with TTL
     if (galleryCache.has(key)) {
-        setImages(galleryCache.get(key)!);
-        setHasFetched(true);
-        return;
+        const entry = galleryCache.get(key)!;
+        if (Date.now() - entry.timestamp < CACHE_TTL) {
+            setImages(entry.data);
+            setHasFetched(true);
+            return;
+        } else {
+            galleryCache.delete(key);
+        }
     }
 
     setIsLoading(true);
@@ -62,7 +86,14 @@ export function useFactImages(fact: Fact, shouldPreload: boolean = false): UseFa
           setError('No images found');
       } else {
           setImages(galleryImages);
-          galleryCache.set(key, galleryImages);
+          
+          // Lazy pruning before adding new entry
+          pruneCache();
+          galleryCache.set(key, { 
+              data: galleryImages, 
+              timestamp: Date.now() 
+          });
+          
           setHasFetched(true);
       }
     } catch (err) {
@@ -86,8 +117,13 @@ export function useFactImages(fact: Fact, shouldPreload: boolean = false): UseFa
   // Return cached result immediately if available (even before effect runs)
   useEffect(() => {
       if (galleryCache.has(key) && images.length === 0) {
-          setImages(galleryCache.get(key)!);
-          setHasFetched(true);
+          const entry = galleryCache.get(key)!;
+          if (Date.now() - entry.timestamp < CACHE_TTL) {
+              setImages(entry.data);
+              setHasFetched(true);
+          } else {
+              galleryCache.delete(key);
+          }
       }
   }, [key, images.length]);
 

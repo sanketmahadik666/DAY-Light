@@ -28,6 +28,15 @@ interface UseEnhancedFactsResult {
   enhanced: boolean; // Whether enhancements have been applied
 }
 
+// Memory cache for enhanced facts (TTL 5 mins)
+// Prevents re-running expensive normalization/API calls when switching tabs/dates back and forth
+interface EnhancedCacheEntry {
+  facts: Fact[];
+  timestamp: number;
+}
+const CACHE_TTL = 5 * 60 * 1000;
+const enhancedCache = new Map<string, EnhancedCacheEntry>();
+
 /**
  * Call normalization worker (optional enhancement)
  */
@@ -117,6 +126,20 @@ export function useEnhancedFacts(
       return;
     }
 
+    const cacheKey = `${date}:${category || 'all'}`;
+
+    // Check Cache
+    if (enhancedCache.has(cacheKey)) {
+      const entry = enhancedCache.get(cacheKey)!;
+      if (Date.now() - entry.timestamp < CACHE_TTL) {
+        setEnhancedFacts(entry.facts);
+        setEnhanced(true);
+        return;
+      } else {
+        enhancedCache.delete(cacheKey);
+      }
+    }
+
     // Prevent duplicate enhancement runs
     if (enhancementRef.current) {
       await enhancementRef.current;
@@ -155,6 +178,13 @@ export function useEnhancedFacts(
 
         setEnhancedFacts(final);
         setEnhanced(true);
+        
+        // Update Cache
+        enhancedCache.set(cacheKey, {
+          facts: final,
+          timestamp: Date.now(),
+        });
+
       } catch (error) {
         // Fallback to original facts
         setEnhancedFacts(facts);

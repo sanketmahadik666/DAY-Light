@@ -235,3 +235,40 @@ export function useFacts(date: string, category?: string): UseFactsResult {
   return { facts, loading, error, refresh };
 }
 
+/**
+ * Preload facts for a date (Fire & Forget)
+ * Used by predictive algorithms to ensure data is ready before user sees it
+ */
+export async function preloadFacts(date: string, category?: string): Promise<void> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), API_TIMEOUT);
+
+  try {
+     // 1. Check IDB first to avoid wasted work
+     const cachedEntry = await getFacts(date);
+     if (cachedEntry && Date.now() - cachedEntry.cachedAt < 24 * 60 * 60 * 1000) {
+       clearTimeout(timeoutId);
+       return; // Already cached and fresh
+     }
+
+     // 2. Try Static JSON
+     const staticFacts = await fetchFactsFromStatic(date);
+     if (staticFacts.length > 0) {
+       await setFacts(date, staticFacts);
+       clearTimeout(timeoutId);
+       return;
+     }
+
+     // 3. Last resort: API
+     // We use a shorter timeout for preloading (don't block valuable bandwidth too long)
+     const apiFacts = await fetchFactsFromAPI(date, category);
+     if (apiFacts.length > 0) {
+        await setFacts(date, apiFacts);
+     }
+  } catch (err) {
+    // Silent fail for preloading
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
