@@ -41,13 +41,11 @@ export function ImageLayer({
 
   useEffect(() => {
     // Reset state when inputs change
-    if (imageUrl) {
+    if (imageUrl && imageUrl !== imageSrc) {
         setImageSrc(imageUrl);
-        setUseUltimateFallback(false);
         setIsLoaded(false);
-    } else {
+    } else if (!imageUrl && imageSrc !== fallbackIcon) {
         setImageSrc(fallbackIcon);
-        setUseUltimateFallback(imageUrl === null); // If explicitly null, maybe don't fallback immediately? Logic says null = fallback
         setIsLoaded(false);
     }
   }, [imageUrl, fallbackIcon]);

@@ -87,18 +87,20 @@ export function GalleryScroller({
     >
       {slides.map((fact, index) => {
         // Only render visible slides + prefetch range
-        if (index < visibleRange.start || index > visibleRange.end) {
-          return null;
-        }
-
+        const isVisible = index >= visibleRange.start && index <= visibleRange.end;
+        
         return (
-          <MemoizedFactSlide
+          <div
             key={fact.id}
-            fact={fact}
-            index={index}
-            isActive={index === currentIndex}
-            priority={index === currentIndex || index === currentIndex + 1}
-          />
+            className={`w-full h-full ${isVisible ? 'block' : 'hidden'}`}
+          >
+            <MemoizedFactSlide
+              fact={fact}
+              index={index}
+              isActive={index === currentIndex}
+              priority={index === currentIndex || index === currentIndex + 1}
+            />
+          </div>
         );
       })}
     </div>
