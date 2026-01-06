@@ -24,10 +24,10 @@ export function GalleryScroller({
   const prevSlidesLengthRef = useRef<number>(slides.length);
 
   useEffect(() => {
-    const start = Math.max(0, currentIndex - prefetchDistance);
-    const end = Math.min(slides.length, currentIndex + prefetchDistance);
+    const start = Math.max(0, currentIndex - 3);
+    const end = Math.min(slides.length, currentIndex + 4);
     setVisibleRange({ start, end });
-  }, [currentIndex, slides.length, prefetchDistance]);
+  }, [currentIndex, slides.length]);
 
   useEffect(() => {
     const container = containerRef.current;
