@@ -18,6 +18,11 @@ body {
   color: var(--foreground);
   background: var(--background);
   font-family: var(--font-sans), system-ui, sans-serif;
+  cursor: default !important;
+}
+
+* {
+  cursor: default !important;
 }
 
 @layer utilities {

@@ -68,11 +68,11 @@ export function ImageLayer({
       <motion.div
         className="absolute inset-0"
         animate={{
-          scale: isActive ? 1.03 : 1,
+          scale: isActive ? 1.02 : 1,
         }}
         transition={{
-          duration: 0.35,
-          ease: 'easeOut',
+          duration: 0.5,
+          ease: 'linear',
         }}
       >
         {useUltimateFallback ? (

@@ -22,9 +22,8 @@ export function GalleryScroller({
   const prevSlidesLengthRef = useRef<number>(slides.length);
 
   useEffect(() => {
-    // Update visible range based on current index
     const start = Math.max(0, currentIndex - prefetchDistance);
-    const end = Math.min(slides.length, currentIndex + prefetchDistance + 1);
+    const end = Math.min(slides.length, currentIndex + prefetchDistance);
     setVisibleRange({ start, end });
   }, [currentIndex, slides.length, prefetchDistance]);
 

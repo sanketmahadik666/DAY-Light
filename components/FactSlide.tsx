@@ -55,10 +55,10 @@ export const FactSlide = memo(function FactSlide({
       }}
       role="group"
       aria-roledescription="slide"
-      initial={{ opacity: 0 }}
+      initial={false}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
-      transition={{ duration: 0.2 }} // Faster transition to prevent overlap
+      transition={{ duration: 0.15 }} // Faster transition to prevent overlap
       onViewportEnter={onEnter}
       onViewportLeave={onExit}
     >
