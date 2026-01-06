@@ -310,7 +310,10 @@ export function GalleryShell({
     if (loading && facts.length === 0) {
       return (
         <div className="flex items-center justify-center min-h-screen bg-black">
-          <div className="text-lg text-white">Loading facts...</div>
+          <div className="flex flex-col items-center gap-4">
+            <div className="w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full animate-spin" />
+            <div className="text-lg text-white">Loading facts...</div>
+          </div>
           {showDatePicker && (
             <button
               onClick={handleChangeDateFromGallery}
@@ -332,15 +335,41 @@ export function GalleryShell({
     // Show error state if error and no facts
     if (error && facts.length === 0) {
       return (
-        <div className="flex items-center justify-center min-h-screen bg-black">
-          <div className="text-center">
-            <div className="text-lg text-red-500 mb-4">Error loading facts: {error.message}</div>
+        <div className="flex items-center justify-center min-h-screen bg-black px-4">
+          <div className="text-center max-w-md bg-gray-900/80 p-8 rounded-2xl backdrop-blur-md border border-red-500/20">
+            <div className="text-red-500 mb-4 text-4xl">⚠️</div>
+            <h3 className="text-xl font-bold text-white mb-2">Unavailable</h3>
+            <p className="text-gray-400 mb-6">{error.message}</p>
             {showDatePicker && (
               <button
                 onClick={handleChangeDateFromGallery}
-                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+                className="px-6 py-2 bg-white text-black font-medium rounded-lg hover:bg-gray-200 transition-colors"
               >
-                Change Date
+                Choose Another Date
+              </button>
+            )}
+          </div>
+        </div>
+      );
+    }
+
+    // Show empty state if no facts found (The "Stuck" Fix)
+    if (!loading && !error && facts.length === 0) {
+      return (
+        <div className="flex items-center justify-center min-h-screen bg-black px-4">
+          <div className="text-center max-w-md bg-gray-900/80 p-8 rounded-2xl backdrop-blur-md border border-white/10">
+            <div className="text-gray-500 mb-4 text-4xl">📭</div>
+            <h3 className="text-xl font-bold text-white mb-2">No Facts Found</h3>
+            <p className="text-gray-400 mb-6">
+              We couldn't find any historical facts for this specific date selection.
+            </p>
+            {showDatePicker && (
+              <button
+                onClick={handleChangeDateFromGallery}
+                className="px-6 py-2 bg-white text-black font-medium rounded-lg hover:bg-gray-200 transition-colors"
+                autoFocus
+              >
+                Choose Another Date
               </button>
             )}
           </div>
@@ -353,23 +382,16 @@ export function GalleryShell({
     <>
       <GalleryContext.Provider value={{ currentIndex, setCurrentIndex, slides: facts }}>
         <div
-          className="fixed inset-0 z-50 bg-black"
+          className="fixed inset-0 z-50 bg-black isolate"
           role="region"
           aria-label="Fact gallery"
           aria-live="polite"
-          style={{ 
-            isolation: 'isolate', // Create new stacking context
-          }}
         >
           {/* Header with change date button - Higher z-index to prevent overlap */}
           {showDatePicker && (
             <button
               onClick={handleChangeDateFromGallery}
-              className="absolute top-4 left-4 z-[60] px-4 py-2 bg-black/70 text-white rounded-lg hover:bg-black/90 backdrop-blur-md transition-colors shadow-lg border border-white/10"
-              style={{ 
-                position: 'fixed', // Ensure it stays on top
-                zIndex: 60,
-              }}
+              className="top-4 left-4 z-[60] px-4 py-2 bg-black/70 text-white rounded-lg hover:bg-black/90 backdrop-blur-md transition-colors shadow-lg border border-white/10 fixed"
               aria-label="Change date"
             >
               <span className="flex items-center gap-2">

@@ -48,7 +48,7 @@ export const FactSlide = memo(function FactSlide({
 
   return (
     <motion.div
-      className="w-screen h-screen relative bg-black/5 dark:bg-black snap-start"
+      className="w-screen h-screen relative bg-black/5 dark:bg-black snap-start overflow-hidden"
       style={{ 
         zIndex: 1, // Ensure slides are below modal (z-100) and button (z-60)
         position: 'relative', // Ensure proper stacking context

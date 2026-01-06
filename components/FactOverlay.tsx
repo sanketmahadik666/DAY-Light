@@ -18,7 +18,7 @@ export function FactOverlay({ fact, isExpanded, onExpand, onGalleryOpen }: FactO
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.3, ease: 'easeOut' }}
       >
-        <h1 className="text-4xl md:text-5xl font-serif font-bold mb-4 text-balance">
+        <h1 className="text-4xl md:text-5xl font-serif font-bold mb-4 min-h-[1.2em]">
           {fact.title}
         </h1>
 

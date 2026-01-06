@@ -125,6 +125,18 @@ export function useFactsRange(
       }));
       setAllFacts(minimalFacts);
       setError(new Error(`Failed to load facts: ${errors.map(e => e.message).join(', ')}`));
+    } else if (aggregatedFacts.length === 0) {
+      // Logic gap fix: No errors, but no facts found (empty API response)
+      // Return minimal offline facts so the UI doesn't get stuck
+      const minimalFacts: Fact[] = dates.map((date, index) => ({
+        id: `${date}-offline-${index}`,
+        title: `Facts for ${date}`,
+        date,
+        category: category as any || 'Historical',
+      }));
+      setAllFacts(minimalFacts);
+      // Don't set error, just silent fallback or maybe a warning
+      console.warn(`No facts found for ${dates.join(', ')}, falling back to placeholders.`);
     } else {
       setAllFacts(aggregatedFacts);
       if (errors.length > 0) {
