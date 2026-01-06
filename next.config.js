@@ -2,6 +2,8 @@
 const nextConfig = {
   reactStrictMode: true,
   swcMinify: true,
+  poweredByHeader: false,
+  compress: true,
   allowedDevOrigins: ['*.replit.dev', '*.replit.app', '*.repl.co'],
   images: {
     remotePatterns: [

@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, memo } from 'react';
 import type { Fact } from '@/types/fact';
 import { FactSlide } from './FactSlide';
 
@@ -10,6 +10,8 @@ interface GalleryScrollerProps {
   onIndexChange: (index: number) => void;
   prefetchDistance?: number;
 }
+
+const MemoizedFactSlide = memo(FactSlide);
 
 export function GalleryScroller({
   slides,
@@ -90,13 +92,12 @@ export function GalleryScroller({
         }
 
         return (
-          <FactSlide
+          <MemoizedFactSlide
             key={fact.id}
             fact={fact}
             index={index}
             isActive={index === currentIndex}
             priority={index === currentIndex || index === currentIndex + 1}
-            shouldPreloadGallery={Math.abs(index - currentIndex) <= 1}
           />
         );
       })}
