@@ -1,13 +1,14 @@
-'use client';
-
 import { useEffect, useRef, useState, memo } from 'react';
 import type { Fact } from '@/types/fact';
 import { FactSlide } from './FactSlide';
+import { FactCard } from './FactCard';
 
 interface GalleryScrollerProps {
   slides: Fact[];
   currentIndex: number;
   onIndexChange: (index: number) => void;
+  layout?: 'slides' | 'masonry';
+  onLayoutChange?: (layout: 'slides' | 'masonry') => void;
   prefetchDistance?: number;
 }
 
@@ -17,15 +18,22 @@ export function GalleryScroller({
   slides,
   currentIndex,
   onIndexChange,
+  layout = 'slides',
+  onLayoutChange,
   prefetchDistance = 2,
 }: GalleryScrollerProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [visibleRange, setVisibleRange] = useState({ start: 0, end: 10 });
   const [scrollVelocity, setScrollVelocity] = useState(0);
-  const prevSlidesLengthRef = useRef<number>(slides.length);
   const lastScrollState = useRef({ top: 0, time: Date.now() });
 
   useEffect(() => {
+    // Only prefetch in slides mode
+    if (layout !== 'slides') {
+      // In masonry, we rely on browser native lazy loading + intersection observer in FactCard
+      return;
+    }
+
     // Dynamic Preloading based on Velocity
     // Base: 2 slides
     // fast scroll: up to 5 slides
@@ -36,9 +44,11 @@ export function GalleryScroller({
     const end = Math.min(slides.length, currentIndex + prefetchCount);
     
     setVisibleRange({ start, end });
-  }, [currentIndex, slides.length, scrollVelocity]);
+  }, [currentIndex, slides.length, scrollVelocity, layout]);
 
   useEffect(() => {
+    if (layout !== 'slides') return;
+
     const container = containerRef.current;
     if (!container) return;
 
@@ -66,7 +76,6 @@ export function GalleryScroller({
       }
 
       // Use cached height
-      // Floating point math is safer for high-DPI screens, but Math.round usually suffices for fullscreen snap
       const newIndex = Math.round(scrollTop / cachedSlideHeight);
       
       if (newIndex !== currentIndex && newIndex >= 0 && newIndex < slides.length) {
@@ -80,7 +89,47 @@ export function GalleryScroller({
       container.removeEventListener('scroll', handleScroll);
       window.removeEventListener('resize', handleResize);
     };
-  }, [currentIndex, slides.length, onIndexChange]);
+  }, [currentIndex, slides.length, onIndexChange, layout]);
+
+  // Scroll to current index when switching back to slides
+  useEffect(() => {
+    if (layout === 'slides' && containerRef.current) {
+        // Instant jump to correct slide
+        // We use a small timeout to ensure layout is ready
+        setTimeout(() => {
+            if (containerRef.current) {
+                containerRef.current.scrollTop = currentIndex * window.innerHeight;
+            }
+        }, 0);
+    }
+  }, [layout, currentIndex]);
+  
+  // Handler for card click
+  const handleCardClick = (index: number) => {
+    onIndexChange(index);
+    onLayoutChange?.('slides');
+  };
+
+  if (layout === 'masonry') {
+    return (
+      <div 
+        ref={containerRef}
+        className="w-full h-screen overflow-y-auto bg-gray-50 dark:bg-black p-4 pt-16"
+      >
+        <div className="columns-1 sm:columns-2 lg:columns-3 xl:columns-4 gap-4 max-w-7xl mx-auto space-y-4">
+             {slides.map((fact, index) => (
+               <FactCard 
+                 key={fact.id} 
+                 fact={fact} 
+                 onClick={() => handleCardClick(index)}
+                 priority={index < 8}
+               />
+             ))}
+        </div>
+        <div className="h-20" /> {/* Bottom padding */}
+      </div>
+    );
+  }
 
   return (
     <div

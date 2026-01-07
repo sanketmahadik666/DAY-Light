@@ -54,6 +54,11 @@ export function GalleryShell({
   const [datePickerKey, setDatePickerKey] = useState(0); // Force remount when needed
   const [galleryKey, setGalleryKey] = useState(0); // Force remount of gallery scroller on date change
   const [isDateModalOpen, setIsDateModalOpen] = useState(false);
+  const [galleryLayout, setGalleryLayout] = useState<'slides' | 'masonry'>('slides');
+
+  const toggleLayout = useCallback(() => {
+    setGalleryLayout(prev => prev === 'slides' ? 'masonry' : 'slides');
+  }, []);
   
   // Determine which date to use for single-date mode
   const singleDate = dateSelection?.mode === 'single' 
@@ -392,26 +397,57 @@ export function GalleryShell({
         >
           <p>We&apos;re having trouble loading the gallery. Please try again later.</p>
           {/* Header with change date button - Higher z-index to prevent overlap */}
-          {showDatePicker && (
+          {/* Header with controls - Higher z-index to prevent overlap */}
+          <div className="fixed top-4 left-4 z-[60] flex items-center gap-2">
+            {showDatePicker && (
+              <button
+                onClick={handleChangeDateFromGallery}
+                className="px-4 py-2 bg-black/70 text-white rounded-lg hover:bg-black/90 backdrop-blur-md transition-colors shadow-lg border border-white/10"
+                aria-label="Change date"
+              >
+                <span className="flex items-center gap-2">
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                  </svg>
+                  <span className="hidden sm:inline">Date</span>
+                </span>
+              </button>
+            )}
+            
+            {/* View Toggle */}
             <button
-              onClick={handleChangeDateFromGallery}
-              className="top-4 left-4 z-[60] px-4 py-2 bg-black/70 text-white rounded-lg hover:bg-black/90 backdrop-blur-md transition-colors shadow-lg border border-white/10 fixed"
-              aria-label="Change date"
+                onClick={toggleLayout}
+                className="px-4 py-2 bg-black/70 text-white rounded-lg hover:bg-black/90 backdrop-blur-md transition-colors shadow-lg border border-white/10"
+                aria-label="Toggle view"
             >
-              <span className="flex items-center gap-2">
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
-                </svg>
-                Change Date
-              </span>
+                <span className="flex items-center gap-2">
+                  {galleryLayout === 'slides' ? (
+                    <>
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z" />
+                      </svg>
+                      <span className="hidden sm:inline">Grid</span>
+                    </>
+                  ) : (
+                    <>
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+                      </svg>
+                      <span className="hidden sm:inline">Slides</span>
+                    </>
+                  )}
+                </span>
             </button>
-          )}
+          </div>
+
           {facts.length > 0 && (
             <GalleryScroller
               key={galleryKey}
               slides={facts}
               currentIndex={currentIndex}
               onIndexChange={handleIndexChange}
+              layout={galleryLayout}
+              onLayoutChange={setGalleryLayout}
               prefetchDistance={2}
             />
           )}
