@@ -5,12 +5,26 @@
 :root {
   --background: #ffffff;
   --foreground: #000000;
+
+  /* New Theme Tokens */
+  --bg-base: #CFDBD1;    /* RGB 207, 219, 209 */
+  --bg-milky: #F7F8F5;   /* RGB 247, 248, 245 */
+  --text-ink: #1F1A2E;   /* RGB 31, 26, 46 */
+  --accent-violet: #7C6F9F; /* RGB 124, 111, 159 */
+  --accent-pink: #F3DDE5;   /* RGB 243, 221, 229 */
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
     --background: #000000;
     --foreground: #ffffff;
+    
+    /* Dark Mode Mappings (Inverted/Adjusted) */
+    --bg-base: #1F2937;    /* Dark gray */
+    --bg-milky: #111827;   /* Darker gray */
+    --text-ink: #F7F8F5;   /* Light milky text */
+    --accent-violet: #9F92C8; /* Lighter violet for dark mode */
+    --accent-pink: #4B3B45;   /* Dark pink/brown for contrast */
   }
 }
 

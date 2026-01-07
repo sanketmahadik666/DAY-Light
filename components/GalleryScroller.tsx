@@ -114,7 +114,7 @@ export function GalleryScroller({
     return (
       <div 
         ref={containerRef}
-        className="w-full h-screen overflow-y-auto bg-gray-50 dark:bg-black p-4 pt-16"
+        className="w-full h-screen overflow-y-auto bg-theme-base dark:bg-black p-4 pt-16"
       >
         <div className="columns-1 sm:columns-2 lg:columns-3 xl:columns-4 gap-4 max-w-7xl mx-auto space-y-4">
              {slides.map((fact, index) => (
