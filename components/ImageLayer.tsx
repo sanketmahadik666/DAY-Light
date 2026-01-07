@@ -1,7 +1,7 @@
 'use client';
 
 import Image from 'next/image';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 const ALLOWED_HOSTS = new Set([
   'upload.wikimedia.org',
   'commons.wikimedia.org',
@@ -48,7 +48,7 @@ export function ImageLayer({
         setImageSrc(fallbackIcon);
         setIsLoaded(false);
     }
-  }, [imageUrl, fallbackIcon]);
+  }, [imageUrl, fallbackIcon, imageSrc]);
 
   const handleError = () => {
     if (imageSrc !== fallbackIcon && imageSrc !== ULTIMATE_FALLBACK) {
@@ -61,10 +61,26 @@ export function ImageLayer({
     }
   };
 
+  // Safe check for optimization
+  const shouldOptimize = useMemo(() => {
+    if (!imageSrc) return false;
+    if (!imageSrc.startsWith('http')) return true; // Local images are fine
+    
+    try {
+      const url = new URL(imageSrc);
+      return ALLOWED_HOSTS.has(url.hostname);
+    } catch (e) {
+      // If URL parsing fails, default to unoptimized to avoid hydration mismatches or Next.js errors
+      console.warn(`[ImageLayer] Invalid URL for optimization check: ${imageSrc}`);
+      return false; 
+    }
+  }, [imageSrc]); // Only re-calc when source changes
+
   return (
     <div className="absolute inset-0 z-0 overflow-hidden bg-gray-900">
       <motion.div
         className="absolute inset-0"
+        whileHover={undefined} // Explicitly disable hover here if not needed
         animate={{
           scale: isActive ? 1.015 : 1,
         }}
@@ -90,7 +106,7 @@ export function ImageLayer({
               sizes="100vw"
               onLoad={() => setIsLoaded(true)}
               onError={handleError}
-              unoptimized={imageSrc.startsWith('http') && !ALLOWED_HOSTS.has(new URL(imageSrc).hostname)} // Skip optimization for unknown hosts to avoid 400s from Next.js
+              unoptimized={!shouldOptimize} 
             />
         )}
         
@@ -100,6 +116,7 @@ export function ImageLayer({
                 src={fallbackIcon}
                 alt=""
                 className="absolute inset-0 w-full h-full object-cover opacity-50 blur-sm"
+                aria-hidden="true"
             />
         )}
 

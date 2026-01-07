@@ -102,6 +102,9 @@ export function GalleryShell({
   // Keyboard navigation
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      // Only handle keys in gallery mode
+      if (viewMode !== 'gallery') return;
+
       if (e.key === 'ArrowDown' && currentIndex < facts.length - 1) {
         e.preventDefault();
         setCurrentIndex(prev => prev + 1);
@@ -115,7 +118,7 @@ export function GalleryShell({
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [currentIndex, facts.length, onClose]);
+  }, [currentIndex, facts.length, onClose, viewMode]);
 
   // Prevent body scroll when gallery is open
   useEffect(() => {
@@ -361,7 +364,7 @@ export function GalleryShell({
             <div className="text-gray-500 mb-4 text-4xl">📭</div>
             <h3 className="text-xl font-bold text-white mb-2">No Facts Found</h3>
             <p className="text-gray-400 mb-6">
-              We couldn't find any historical facts for this specific date selection.
+              We couldn&apos;t find any historical facts for this specific date selection.
             </p>
             {showDatePicker && (
               <button
@@ -387,6 +390,7 @@ export function GalleryShell({
           aria-label="Fact gallery"
           aria-live="polite"
         >
+          <p>We&apos;re having trouble loading the gallery. Please try again later.</p>
           {/* Header with change date button - Higher z-index to prevent overlap */}
           {showDatePicker && (
             <button

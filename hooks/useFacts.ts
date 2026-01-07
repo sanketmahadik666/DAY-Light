@@ -25,7 +25,7 @@ const API_TIMEOUT = 2500; // 2.5 seconds
 /**
  * Fetch facts from Wikimedia OnThisDay API
  */
-async function fetchFactsFromAPI(date: string, category?: string): Promise<Fact[]> {
+export async function fetchFactsFromAPI(date: string, category?: string): Promise<Fact[]> {
   try {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), API_TIMEOUT);

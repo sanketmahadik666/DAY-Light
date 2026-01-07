@@ -42,6 +42,15 @@ export function GalleryScroller({
     const container = containerRef.current;
     if (!container) return;
 
+    // Cache slide height to avoid layout thrashing during scroll
+    let cachedSlideHeight = window.innerHeight;
+
+    const handleResize = () => {
+       cachedSlideHeight = window.innerHeight;
+    };
+    
+    window.addEventListener('resize', handleResize);
+
     const handleScroll = () => {
       const scrollTop = container.scrollTop;
       const now = Date.now();
@@ -56,9 +65,9 @@ export function GalleryScroller({
         lastScrollState.current = { top: scrollTop, time: now };
       }
 
-      // ... existing index calculation ...
-      const slideHeight = window.innerHeight;
-      const newIndex = Math.round(scrollTop / slideHeight);
+      // Use cached height
+      // Floating point math is safer for high-DPI screens, but Math.round usually suffices for fullscreen snap
+      const newIndex = Math.round(scrollTop / cachedSlideHeight);
       
       if (newIndex !== currentIndex && newIndex >= 0 && newIndex < slides.length) {
         onIndexChange(newIndex);
@@ -69,6 +78,7 @@ export function GalleryScroller({
 
     return () => {
       container.removeEventListener('scroll', handleScroll);
+      window.removeEventListener('resize', handleResize);
     };
   }, [currentIndex, slides.length, onIndexChange]);
 

@@ -41,10 +41,10 @@ export const FactSlide = memo(function FactSlide({
 
   const imageUrl = hiResUrl || fallbackIcon;
 
-  const handleGalleryOpen = () => {
+  const handleGalleryOpen = useCallback(() => {
     setGalleryOpen(true);
     fetchGallery();
-  };
+  }, [setGalleryOpen, fetchGallery]);
 
   return (
     <motion.div
@@ -78,14 +78,16 @@ export const FactSlide = memo(function FactSlide({
         onGalleryOpen={handleGalleryOpen}
       />
 
-      <ImageGallery
-        isOpen={isGalleryOpen}
-        onClose={() => setGalleryOpen(false)}
-        images={galleryImages}
-        isLoading={galleryLoading}
-        error={galleryError}
-        title={fact.title || fact.category}
-      />
+      {isGalleryOpen && (
+        <ImageGallery
+          isOpen={isGalleryOpen}
+          onClose={() => setGalleryOpen(false)}
+          images={galleryImages}
+          isLoading={galleryLoading}
+          error={galleryError}
+          title={fact.title || fact.category}
+        />
+      )}
     </motion.div>
   );
 });

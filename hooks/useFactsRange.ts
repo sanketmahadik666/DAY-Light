@@ -32,7 +32,7 @@ import { useState, useEffect, useCallback } from 'react';
 import type { Fact } from '@/types/fact';
 import type { DateSelection } from '@/types/workflow';
 import { generateDateList } from '@/lib/workflowHelpers';
-import { useFacts } from './useFacts';
+import { useFacts, fetchFactsFromAPI } from './useFacts';
 
 interface UseFactsRangeResult {
   facts: Fact[];
@@ -79,38 +79,44 @@ export function useFactsRange(
     const factsByDate: Map<string, Fact[]> = new Map();
     const errors: Error[] = [];
 
-    // Fetch facts for each date sequentially (to avoid rate limiting)
-    for (let i = 0; i < dates.length; i++) {
-      const date = dates[i];
-      setProgress({ total: dates.length, completed: i, current: date });
+    // Batch processing helper
+    const processBatch = async (batchDates: string[]) => {
+      const promises = batchDates.map(async (date) => {
+         try {
+           const facts = await fetchFactsFromAPI(date, category);
+           if (facts.length > 0) {
+             factsByDate.set(date, facts);
+           }
+         } catch (err) {
+           const error = err instanceof Error ? err : new Error(`Unknown error for ${date}`);
+           errors.push(error);
+         } finally {
+            // Update progress safely
+            setProgress(prev => ({ 
+                ...prev, 
+                completed: Math.min(prev.total, prev.completed + 1),
+                current: date 
+            }));
+         }
+      });
+      await Promise.all(promises);
+    };
 
-      try {
-        // Use a simple fetch approach for each date
-        // We'll call the API directly for each date
-        const response = await fetch(`/api/facts?date=${date}${category ? `&category=${category}` : ''}`, {
-          signal: AbortSignal.timeout(2500),
-          headers: { accept: 'application/json' },
-        });
-
-        if (response.ok) {
-          const json = await response.json();
-          if (json?.facts && Array.isArray(json.facts)) {
-            factsByDate.set(date, json.facts);
-          }
-        } else {
-          errors.push(new Error(`Failed to fetch facts for ${date}: ${response.status}`));
-        }
-      } catch (err) {
-        const error = err instanceof Error ? err : new Error(`Unknown error for ${date}`);
-        errors.push(error);
-        // Continue with next date
-      }
+    // Process in batches of 3 to respect rate limits while improving speed
+    const BATCH_SIZE = 3;
+    for (let i = 0; i < dates.length; i += BATCH_SIZE) {
+        const batch = dates.slice(i, i + BATCH_SIZE);
+        await processBatch(batch);
     }
 
     // Aggregate all facts
     const aggregatedFacts: Fact[] = [];
-    factsByDate.forEach((facts, date) => {
-      aggregatedFacts.push(...facts);
+    // Sort dates to maintain order
+    dates.forEach(date => {
+        const facts = factsByDate.get(date);
+        if (facts) {
+            aggregatedFacts.push(...facts);
+        }
     });
 
     setProgress({ total: dates.length, completed: dates.length, current: null });
@@ -126,8 +132,7 @@ export function useFactsRange(
       setAllFacts(minimalFacts);
       setError(new Error(`Failed to load facts: ${errors.map(e => e.message).join(', ')}`));
     } else if (aggregatedFacts.length === 0) {
-      // Logic gap fix: No errors, but no facts found (empty API response)
-      // Return minimal offline facts so the UI doesn't get stuck
+      // No facts found (empty API response)
       const minimalFacts: Fact[] = dates.map((date, index) => ({
         id: `${date}-offline-${index}`,
         title: `Facts for ${date}`,
@@ -135,13 +140,13 @@ export function useFactsRange(
         category: category as any || 'Historical',
       }));
       setAllFacts(minimalFacts);
-      // Don't set error, just silent fallback or maybe a warning
       console.warn(`No facts found for ${dates.join(', ')}, falling back to placeholders.`);
     } else {
       setAllFacts(aggregatedFacts);
       if (errors.length > 0) {
         // Some dates failed, but we have partial results
-        setError(new Error(`Some dates failed: ${errors.length} of ${dates.length}`));
+        // Don't set error state to prevent error UI blocking content
+        console.warn(`Partial success: ${errors.length} of ${dates.length} dates failed.`);
       }
     }
 

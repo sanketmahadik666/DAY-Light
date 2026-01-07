@@ -10,7 +10,11 @@ interface FactOverlayProps {
   onGalleryOpen?: () => void;
 }
 
-export function FactOverlay({ fact, isExpanded, onExpand, onGalleryOpen }: FactOverlayProps) {
+import { memo } from 'react';
+
+// ... imports
+
+export const FactOverlay = memo(function FactOverlay({ fact, isExpanded, onExpand, onGalleryOpen }: FactOverlayProps) {
   return (
     <div className="relative z-10 max-w-[900px] mx-auto px-6 py-12 text-white pointer-events-none">
       <motion.div
@@ -47,7 +51,7 @@ export function FactOverlay({ fact, isExpanded, onExpand, onGalleryOpen }: FactO
           <button
             onClick={onExpand}
             className="px-4 py-2 bg-white/20 backdrop-blur-sm rounded-lg hover:bg-white/30 transition-colors"
-            aria-expanded={isExpanded ? true : undefined}
+            aria-expanded={isExpanded}
             aria-label={isExpanded ? 'Collapse description' : 'Expand description'}
             target-lint-error-ids="a216cdd8-7b4c-4a77-8901-ab4b0007f5c9"
           >
@@ -81,5 +85,5 @@ export function FactOverlay({ fact, isExpanded, onExpand, onGalleryOpen }: FactO
       </motion.div>
     </div>
   );
-}
+});
 
