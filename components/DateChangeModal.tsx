@@ -76,6 +76,7 @@ export function DateChangeModal({
 
   // Handle escape key
   useEffect(() => {
+    // Only attach listener when open
     if (!isOpen) return;
 
     const handleEscape = (e: KeyboardEvent) => {

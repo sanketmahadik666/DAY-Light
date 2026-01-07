@@ -186,13 +186,19 @@ export function DatePicker({
   // Update selection when dates change
   // NOTE: This auto-emits on every change. Parent components should handle this appropriately.
   // For modal usage, parent should use onValidationChange to track validity without auto-submitting.
+  // Update selection when dates change
+  // Debounced to avoid spamming parent on every keystroke
   useEffect(() => {
-    if (selectionMode === 'single') {
-      validateSingleDate(singleDate);
-    } else {
-      validateDateRange(startDate, endDate);
-    }
-    emitSelection();
+    const timer = setTimeout(() => {
+        if (selectionMode === 'single') {
+          validateSingleDate(singleDate);
+        } else {
+          validateDateRange(startDate, endDate);
+        }
+        emitSelection();
+    }, 300);
+
+    return () => clearTimeout(timer);
   }, [singleDate, startDate, endDate, selectionMode, validateSingleDate, validateDateRange, emitSelection]);
 
   const handleModeChange = (newMode: DateSelectionMode) => {
