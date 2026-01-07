@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, memo } from 'react';
+import { useState, memo, useCallback } from 'react';
 import { motion } from 'framer-motion';
 import type { Fact } from '@/types/fact';
 import { ImageLayer } from './ImageLayer';
