@@ -81,8 +81,11 @@ services:
       PORT: 3001
       MONGODB_URI: mongodb://${MONGO_ROOT_USER:-admin}:${MONGO_ROOT_PASSWORD:-changeme}@mongodb:27017/daylight?authSource=admin
       MONGODB_DB: daylight
+      REDIS_URL: redis://redis:6379
     depends_on:
       mongodb:
+        condition: service_healthy
+      redis:
         condition: service_healthy
     networks:
       - daylight-network
@@ -123,6 +126,26 @@ services:
       - daylight-network
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:3002/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Image Processing Service
+  image-service:
+    build:
+      context: ./services/image-service
+      dockerfile: Dockerfile
+    container_name: daylight-image-service
+    restart: unless-stopped
+    ports:
+      - "3003:3003"
+    environment:
+      NODE_ENV: production
+      PORT: 3003
+    networks:
+      - daylight-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3003/health"]
       interval: 30s
       timeout: 10s
       retries: 3

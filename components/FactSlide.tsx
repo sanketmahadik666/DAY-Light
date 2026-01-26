@@ -88,6 +88,7 @@ export const FactSlide = memo(function FactSlide({
         alt={`${fact.title} - ${fact.category}`}
         priority={priority}
         isActive={isActive}
+        factId={fact.id}
       />
 
       <FactOverlay

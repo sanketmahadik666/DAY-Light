@@ -15,6 +15,7 @@ const upload = multer({
 });
 
 export function createBatchUploadRouter(storageService: StorageService): Router {
+  // Include single upload route from batch router
   const router = Router();
 
   /**

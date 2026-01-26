@@ -1,7 +1,6 @@
 /**
  * Analytics Data Collector (Client-Side)
- * ONLY collects raw events - NO computation/aggregation
- * All processing happens on backend
+ * Resilient event collection with retry, queue, and graceful degradation
  */
 
 interface RawFactViewEvent {
@@ -37,14 +36,27 @@ interface RawImageLoadEvent {
   sessionId?: string;
 }
 
+interface QueuedEvent {
+  type: 'factView' | 'apiCall' | 'imageLoad';
+  data: RawFactViewEvent | RawAPICallEvent | RawImageLoadEvent;
+  retryCount: number;
+  queuedAt: number;
+}
+
 class AnalyticsCollector {
   private factViews: RawFactViewEvent[] = [];
   private apiCalls: RawAPICallEvent[] = [];
   private imageLoads: RawImageLoadEvent[] = [];
+  private failedQueue: QueuedEvent[] = []; // Persistent queue for failed events
   private readonly BATCH_SIZE = 50;
   private readonly FLUSH_INTERVAL = 30000; // 30 seconds
+  private readonly MAX_RETRIES = 3;
+  private readonly RETRY_DELAY = 5000; // 5 seconds
   private flushTimer: NodeJS.Timeout | null = null;
+  private retryTimer: NodeJS.Timeout | null = null;
   private sessionId: string;
+  private isOnline: boolean = true;
+  private isFlushing: boolean = false;
 
   constructor() {
     // Generate session ID
@@ -52,7 +64,94 @@ class AnalyticsCollector {
     
     if (typeof window !== 'undefined') {
       this.startAutoFlush();
-      window.addEventListener('beforeunload', () => this.flush());
+      this.startRetryQueue();
+      this.setupOnlineListener();
+      this.loadPersistedQueue();
+      
+      // Flush on page unload
+      window.addEventListener('beforeunload', () => {
+        this.flushSync();
+      });
+
+      // Flush on visibility change (tab switch)
+      document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'hidden') {
+          this.flushSync();
+        }
+      });
+    }
+  }
+
+  /**
+   * Setup online/offline listener
+   */
+  private setupOnlineListener(): void {
+    if (typeof window === 'undefined') return;
+
+    this.isOnline = navigator.onLine;
+
+    window.addEventListener('online', () => {
+      this.isOnline = true;
+      console.log('[Analytics] Back online, flushing queue');
+      this.flush();
+      this.processFailedQueue();
+    });
+
+    window.addEventListener('offline', () => {
+      this.isOnline = false;
+      console.log('[Analytics] Gone offline, queuing events');
+    });
+  }
+
+  /**
+   * Load persisted queue from localStorage
+   */
+  private loadPersistedQueue(): void {
+    if (typeof window === 'undefined') return;
+
+    try {
+      const stored = localStorage.getItem('analytics_failed_queue');
+      if (stored) {
+        const queue = JSON.parse(stored) as QueuedEvent[];
+        this.failedQueue = queue.filter((item) => {
+          // Remove events older than 24 hours
+          return Date.now() - item.queuedAt < 24 * 60 * 60 * 1000;
+        });
+        
+        if (this.failedQueue.length > 0) {
+          console.log(`[Analytics] Loaded ${this.failedQueue.length} queued events`);
+          this.persistQueue();
+        }
+      }
+    } catch (error) {
+      console.error('[Analytics] Failed to load persisted queue:', error);
+    }
+  }
+
+  /**
+   * Persist failed queue to localStorage
+   */
+  private persistQueue(): void {
+    if (typeof window === 'undefined') return;
+
+    try {
+      // Limit queue size to prevent localStorage overflow
+      const maxQueueSize = 100;
+      const queueToStore = this.failedQueue.slice(0, maxQueueSize);
+      localStorage.setItem('analytics_failed_queue', JSON.stringify(queueToStore));
+    } catch (error) {
+      console.error('[Analytics] Failed to persist queue:', error);
+      // If localStorage is full, remove oldest items
+      if (error instanceof DOMException && error.name === 'QuotaExceededError') {
+        this.failedQueue = this.failedQueue.slice(0, 50);
+        try {
+          localStorage.setItem('analytics_failed_queue', JSON.stringify(this.failedQueue));
+        } catch (e) {
+          // If still fails, clear queue
+          this.failedQueue = [];
+          localStorage.removeItem('analytics_failed_queue');
+        }
+      }
     }
   }
 
@@ -141,14 +240,245 @@ class AnalyticsCollector {
    */
   private startAutoFlush(): void {
     this.flushTimer = setInterval(() => {
-      this.flush();
+      if (!this.isFlushing && (this.factViews.length > 0 || this.apiCalls.length > 0 || this.imageLoads.length > 0)) {
+        this.flush();
+      }
     }, this.FLUSH_INTERVAL);
+  }
+
+  /**
+   * Start retry queue processor
+   */
+  private startRetryQueue(): void {
+    this.retryTimer = setInterval(() => {
+      if (this.isOnline && this.failedQueue.length > 0) {
+        this.processFailedQueue();
+      }
+    }, this.RETRY_DELAY);
+  }
+
+  /**
+   * Process failed queue with exponential backoff
+   */
+  private async processFailedQueue(): Promise<void> {
+    if (this.failedQueue.length === 0 || !this.isOnline) return;
+
+    const toRetry = this.failedQueue.filter((item) => item.retryCount < this.MAX_RETRIES);
+    if (toRetry.length === 0) {
+      // Remove items that exceeded max retries
+      this.failedQueue = this.failedQueue.filter((item) => item.retryCount >= this.MAX_RETRIES);
+      this.persistQueue();
+      return;
+    }
+
+    // Process oldest items first
+    toRetry.sort((a, b) => a.queuedAt - b.queuedAt);
+    const batch = toRetry.slice(0, 10); // Process 10 at a time
+
+    for (const item of batch) {
+      try {
+        const payload = this.buildPayloadFromQueueItem(item);
+        const success = await this.sendToBackend(payload);
+
+        if (success) {
+          // Remove from queue
+          this.failedQueue = this.failedQueue.filter((q) => q !== item);
+        } else {
+          // Increment retry count
+          item.retryCount++;
+        }
+      } catch (error) {
+        item.retryCount++;
+      }
+    }
+
+    this.persistQueue();
+  }
+
+  /**
+   * Build payload from queue item
+   */
+  private buildPayloadFromQueueItem(item: QueuedEvent): any {
+    const payload: any = {
+      sessionId: this.sessionId,
+      timestamp: Date.now(),
+    };
+
+    if (item.type === 'factView') {
+      payload.factViews = [item.data];
+    } else if (item.type === 'apiCall') {
+      payload.apiCalls = [item.data];
+    } else if (item.type === 'imageLoad') {
+      payload.imageLoads = [item.data];
+    }
+
+    return payload;
+  }
+
+  /**
+   * Send payload to backend with timeout
+   */
+  private async sendToBackend(payload: any): Promise<boolean> {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 10000); // 10s timeout
+
+    try {
+      const response = await fetch('/api/analytics/collect', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(payload),
+        signal: controller.signal,
+      });
+
+      clearTimeout(timeoutId);
+
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+      }
+
+      return true;
+    } catch (error) {
+      clearTimeout(timeoutId);
+      
+      if (error instanceof Error && error.name === 'AbortError') {
+        console.warn('[Analytics] Request timeout');
+      } else {
+        console.warn('[Analytics] Send failed:', error);
+      }
+      
+      return false;
+    }
   }
 
   /**
    * Flush raw events to backend (NO processing)
    */
   async flush(): Promise<void> {
+    if (this.isFlushing) return;
+    if (!this.isOnline) {
+      console.log('[Analytics] Offline, queuing events');
+      this.queueCurrentEvents();
+      return;
+    }
+
+    if (this.factViews.length === 0 && this.apiCalls.length === 0 && this.imageLoads.length === 0) {
+      return;
+    }
+
+    this.isFlushing = true;
+
+    const payload = {
+      factViews: [...this.factViews],
+      apiCalls: [...this.apiCalls],
+      imageLoads: [...this.imageLoads],
+      sessionId: this.sessionId,
+      timestamp: Date.now(),
+    };
+
+    // Clear buffers immediately (optimistic)
+    this.factViews = [];
+    this.apiCalls = [];
+    this.imageLoads = [];
+
+    try {
+      const success = await this.sendToBackend(payload);
+
+      if (!success) {
+        // Re-queue events on failure
+        this.queuePayload(payload);
+      }
+    } catch (error) {
+      console.error('[Analytics] Flush error:', error);
+      // Re-queue events on error
+      this.queuePayload(payload);
+    } finally {
+      this.isFlushing = false;
+    }
+  }
+
+  /**
+   * Queue current events for retry
+   */
+  private queueCurrentEvents(): void {
+    this.factViews.forEach((event) => {
+      this.failedQueue.push({
+        type: 'factView',
+        data: event,
+        retryCount: 0,
+        queuedAt: Date.now(),
+      });
+    });
+
+    this.apiCalls.forEach((event) => {
+      this.failedQueue.push({
+        type: 'apiCall',
+        data: event,
+        retryCount: 0,
+        queuedAt: Date.now(),
+      });
+    });
+
+    this.imageLoads.forEach((event) => {
+      this.failedQueue.push({
+        type: 'imageLoad',
+        data: event,
+        retryCount: 0,
+        queuedAt: Date.now(),
+      });
+    });
+
+    this.factViews = [];
+    this.apiCalls = [];
+    this.imageLoads = [];
+    this.persistQueue();
+  }
+
+  /**
+   * Queue payload for retry
+   */
+  private queuePayload(payload: any): void {
+    if (payload.factViews) {
+      payload.factViews.forEach((event: RawFactViewEvent) => {
+        this.failedQueue.push({
+          type: 'factView',
+          data: event,
+          retryCount: 0,
+          queuedAt: Date.now(),
+        });
+      });
+    }
+
+    if (payload.apiCalls) {
+      payload.apiCalls.forEach((event: RawAPICallEvent) => {
+        this.failedQueue.push({
+          type: 'apiCall',
+          data: event,
+          retryCount: 0,
+          queuedAt: Date.now(),
+        });
+      });
+    }
+
+    if (payload.imageLoads) {
+      payload.imageLoads.forEach((event: RawImageLoadEvent) => {
+        this.failedQueue.push({
+          type: 'imageLoad',
+          data: event,
+          retryCount: 0,
+          queuedAt: Date.now(),
+        });
+      });
+    }
+
+    this.persistQueue();
+  }
+
+  /**
+   * Synchronous flush (for page unload)
+   */
+  flushSync(): void {
     if (this.factViews.length === 0 && this.apiCalls.length === 0 && this.imageLoads.length === 0) {
       return;
     }
@@ -161,30 +491,27 @@ class AnalyticsCollector {
       timestamp: Date.now(),
     };
 
+    // Use sendBeacon for reliable delivery on page unload
+    if (navigator.sendBeacon) {
+      const blob = new Blob([JSON.stringify(payload)], { type: 'application/json' });
+      navigator.sendBeacon('/api/analytics/collect', blob);
+    } else {
+      // Fallback: Use fetch with keepalive
+      fetch('/api/analytics/collect', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+        keepalive: true,
+      }).catch(() => {
+        // If fetch fails, queue for retry
+        this.queuePayload(payload);
+      });
+    }
+
     // Clear buffers
     this.factViews = [];
     this.apiCalls = [];
     this.imageLoads = [];
-
-    try {
-      const response = await fetch('/api/analytics/collect', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(payload),
-      });
-
-      if (!response.ok) {
-        throw new Error(`Failed to sync analytics: ${response.status}`);
-      }
-    } catch (error) {
-      console.error('Failed to flush analytics:', error);
-      // Re-add data to buffers on failure (simple retry)
-      this.factViews.unshift(...payload.factViews);
-      this.apiCalls.unshift(...payload.apiCalls);
-      this.imageLoads.unshift(...payload.imageLoads);
-    }
   }
 
   /**
@@ -192,6 +519,16 @@ class AnalyticsCollector {
    */
   getSessionId(): string {
     return this.sessionId;
+  }
+
+  /**
+   * Get queue status
+   */
+  getQueueStatus(): { failed: number; pending: number } {
+    return {
+      failed: this.failedQueue.length,
+      pending: this.factViews.length + this.apiCalls.length + this.imageLoads.length,
+    };
   }
 }
 
@@ -214,7 +551,7 @@ export function useFactViewTracking() {
 }
 
 /**
- * API call wrapper with performance tracking
+ * API call wrapper with performance tracking and retry
  */
 export async function trackedFetch(
   url: string,
@@ -245,13 +582,15 @@ export async function trackedFetch(
     const contentLength = response.headers.get('content-length');
     if (contentLength) {
       responseSize = parseInt(contentLength, 10);
-    }
-
-    // Clone response to read body for size if needed
-    const clonedResponse = response.clone();
-    const blob = await clonedResponse.blob();
-    if (!responseSize) {
-      responseSize = blob.size;
+    } else {
+      // Clone response to read body for size if needed
+      try {
+        const clonedResponse = response.clone();
+        const blob = await clonedResponse.blob();
+        responseSize = blob.size;
+      } catch (e) {
+        // Ignore if can't read body
+      }
     }
 
     analyticsCollector?.trackAPICall(

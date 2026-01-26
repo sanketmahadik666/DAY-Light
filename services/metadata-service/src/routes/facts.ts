@@ -5,49 +5,61 @@
 
 import { Router, Request, Response } from 'express';
 import { Fact } from '../schemas/fact.schema';
+import { rateLimiters } from '../middleware/rate-limiter';
+import { redisCache } from '../services/redis-cache';
+import { asyncHandler, OperationalError } from '../middleware/error-handler';
 
 const router = Router();
 
 /**
  * GET /api/facts?date=YYYY-MM-DD&category=...
- * Get facts for a specific date
+ * Get facts for a specific date (with caching)
  */
-router.get('/', async (req: Request, res: Response) => {
-  try {
-    const { date, category, year, limit = 50, offset = 0 } = req.query;
+router.get('/', rateLimiters.facts, asyncHandler(async (req: Request, res: Response) => {
+  const { date, category, year, limit = 50, offset = 0 } = req.query;
 
-    const query: any = {};
-    
-    if (date) {
-      query.date = date;
-    }
-    
-    if (category) {
-      query.category = category;
-    }
-    
-    if (year) {
-      query.year = parseInt(year as string);
-    }
-
-    const facts = await Fact.find(query)
-      .sort({ year: -1, createdAt: -1 })
-      .limit(parseInt(limit as string))
-      .skip(parseInt(offset as string))
-      .lean();
-
-    res.json({
-      success: true,
-      data: facts,
-      count: facts.length,
-    });
-  } catch (error: any) {
-    res.status(500).json({
-      success: false,
-      error: error.message,
-    });
+  const query: any = {};
+  
+  if (date) {
+    query.date = date;
   }
-});
+  
+  if (category) {
+    query.category = category;
+  }
+  
+  if (year) {
+    query.year = parseInt(year as string);
+  }
+
+  // Build cache key
+  const cacheKey = `facts:${JSON.stringify(query)}:${limit}:${offset}`;
+
+  // Try cache first
+  const cached = await redisCache.get<any>(cacheKey, 'facts');
+  if (cached) {
+    res.setHeader('X-Cache', 'HIT');
+    return res.json(cached);
+  }
+
+  const facts = await Fact.find(query)
+    .sort({ year: -1, createdAt: -1 })
+    .limit(parseInt(limit as string))
+    .skip(parseInt(offset as string))
+    .lean();
+
+  const response = {
+    success: true,
+    data: facts,
+    count: facts.length,
+  };
+
+  // Cache for 5 minutes
+  await redisCache.set(cacheKey, response, { ttl: 300, prefix: 'facts' });
+
+  res.setHeader('X-Cache', 'MISS');
+  res.json(response);
+}));
 
 /**
  * GET /api/facts/:id
@@ -202,41 +214,84 @@ router.delete('/:id', async (req: Request, res: Response) => {
 });
 
 /**
- * GET /api/facts/search?q=query
- * Search facts using full-text search
+ * GET /api/facts/search?q=query&category=...&year=...&date=...&fuzzy=true
+ * Enhanced search with filters and fuzzy matching
  */
-router.get('/search', async (req: Request, res: Response) => {
-  try {
-    const { q, limit = 20, offset = 0 } = req.query;
+router.get('/search', rateLimiters.search, asyncHandler(async (req: Request, res: Response) => {
+  const { q, category, year, date, limit = 20, offset = 0, sortBy = 'relevance', fuzzy = 'true' } = req.query;
 
-    if (!q) {
-      return res.status(400).json({
-        success: false,
-        error: 'Query parameter "q" is required',
-      });
-    }
+  if (!q) {
+    throw new OperationalError('Query parameter "q" is required', 400);
+  }
 
-    const facts = await Fact.find(
-      { $text: { $search: q as string } },
-      { score: { $meta: 'textScore' } }
-    )
-      .sort({ score: { $meta: 'textScore' } })
-      .limit(parseInt(limit as string))
-      .skip(parseInt(offset as string))
-      .lean();
+  const { searchService } = await import('../services/search-service');
+  
+  const result = await searchService.search({
+    query: q as string,
+    category: category as string,
+    year: year ? parseInt(year as string) : undefined,
+    date: date as string,
+    limit: parseInt(limit as string),
+    offset: parseInt(offset as string),
+    sortBy: sortBy as 'relevance' | 'date' | 'year',
+    fuzzy: fuzzy === 'true',
+  });
 
-    res.json({
+  res.json({
+    success: true,
+    data: result.facts,
+    count: result.facts.length,
+    total: result.total,
+    query: result.query,
+    filters: result.filters,
+  });
+}));
+
+/**
+ * GET /api/facts/autocomplete?q=query
+ * Get autocomplete suggestions
+ */
+router.get('/autocomplete', rateLimiters.search, asyncHandler(async (req: Request, res: Response) => {
+  const { q, limit = 10 } = req.query;
+
+  if (!q || (q as string).length < 2) {
+    return res.json({
       success: true,
-      data: facts,
-      count: facts.length,
-    });
-  } catch (error: any) {
-    res.status(500).json({
-      success: false,
-      error: error.message,
+      data: { suggestions: [] },
     });
   }
-});
+
+  const { searchService } = await import('../services/search-service');
+  const result = await searchService.autocomplete(q as string, parseInt(limit as string));
+
+  res.json({
+    success: true,
+    data: result,
+  });
+}));
+
+/**
+ * GET /api/facts/suggestions?q=query
+ * Get search suggestions
+ */
+router.get('/suggestions', rateLimiters.search, asyncHandler(async (req: Request, res: Response) => {
+  const { q } = req.query;
+
+  if (!q || (q as string).length < 2) {
+    return res.json({
+      success: true,
+      data: [],
+    });
+  }
+
+  const { searchService } = await import('../services/search-service');
+  const suggestions = await searchService.getSuggestions(q as string);
+
+  res.json({
+    success: true,
+    data: suggestions,
+  });
+}));
 
 /**
  * Helper: Extract keywords from text

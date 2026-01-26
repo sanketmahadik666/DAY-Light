@@ -1,7 +1,7 @@
 'use client';
 
 import Image from 'next/image';
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 const ALLOWED_HOSTS = new Set([
   'upload.wikimedia.org',
   'commons.wikimedia.org',
@@ -11,6 +11,7 @@ const ALLOWED_HOSTS = new Set([
 ]);
 import { motion } from 'framer-motion';
 import type { ImageLoadStatus } from '@/types/fact';
+import { trackImageLoad } from '@/lib/services/analytics-collector';
 
 interface ImageLayerProps {
   imageUrl: string | null;
@@ -18,6 +19,7 @@ interface ImageLayerProps {
   alt: string;
   priority?: boolean;
   isActive?: boolean;
+  factId?: string; // Add factId for tracking
 }
 
 /**
@@ -33,20 +35,24 @@ export function ImageLayer({
   alt,
   priority = false,
   isActive = false,
+  factId,
 }: ImageLayerProps) {
   const [useUltimateFallback, setUseUltimateFallback] = useState(false);
   // Track if we should show the main image
   const [imageSrc, setImageSrc] = useState<string>(imageUrl || fallbackIcon);
   const [isLoaded, setIsLoaded] = useState(false);
+  const loadStartTimeRef = useRef<number>(0);
 
   useEffect(() => {
     // Reset state when inputs change
     if (imageUrl && imageUrl !== imageSrc) {
         setImageSrc(imageUrl);
         setIsLoaded(false);
+        loadStartTimeRef.current = Date.now();
     } else if (!imageUrl && imageSrc !== fallbackIcon) {
         setImageSrc(fallbackIcon);
         setIsLoaded(false);
+        loadStartTimeRef.current = Date.now();
     }
   }, [imageUrl, fallbackIcon, imageSrc]);
 
@@ -54,10 +60,33 @@ export function ImageLayer({
     if (imageSrc !== fallbackIcon && imageSrc !== ULTIMATE_FALLBACK) {
         // First fallback level
         setImageSrc(fallbackIcon);
+        if (factId) {
+          const loadTime = Date.now() - loadStartTimeRef.current;
+          trackImageLoad(factId, imageSrc, loadTime, false);
+        }
     } else if (imageSrc === fallbackIcon) {
         // Second fallback level
         setUseUltimateFallback(true);
         setImageSrc(ULTIMATE_FALLBACK);
+        if (factId) {
+          const loadTime = Date.now() - loadStartTimeRef.current;
+          trackImageLoad(factId, fallbackIcon, loadTime, false);
+        }
+    }
+  };
+
+  const handleLoad = () => {
+    setIsLoaded(true);
+    if (factId && imageSrc) {
+      const loadTime = Date.now() - loadStartTimeRef.current;
+      // Determine storage provider from URL
+      let storageProvider: 'minio' | 'cloudinary' | undefined;
+      if (imageSrc.includes('minio') || imageSrc.includes('daylight-storage')) {
+        storageProvider = 'minio';
+      } else if (imageSrc.includes('cloudinary') || imageSrc.includes('res.cloudinary.com')) {
+        storageProvider = 'cloudinary';
+      }
+      trackImageLoad(factId, imageSrc, loadTime, true, storageProvider);
     }
   };
 
@@ -104,7 +133,7 @@ export function ImageLayer({
               priority={priority}
               className={`object-cover transition-opacity duration-500 ${isLoaded ? 'opacity-100' : 'opacity-0'}`}
               sizes="100vw"
-              onLoad={() => setIsLoaded(true)}
+              onLoad={handleLoad}
               onError={handleError}
               unoptimized={!shouldOptimize} 
             />
@@ -127,4 +156,3 @@ export function ImageLayer({
     </div>
   );
 }
-
