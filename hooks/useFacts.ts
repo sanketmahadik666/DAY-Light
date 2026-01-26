@@ -33,7 +33,9 @@ export async function fetchFactsFromAPI(date: string, category?: string): Promis
     if (category) {
       params.set('category', category);
     }
-    const response = await fetch(`/api/facts?${params.toString()}`, {
+    // Use tracked fetch for analytics
+    const { trackedFetch } = await import('@/lib/services/analytics-collector');
+    const response = await trackedFetch(`/api/facts?${params.toString()}`, {
       signal: controller.signal,
       headers: { accept: 'application/json' },
     });

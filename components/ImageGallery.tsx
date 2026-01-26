@@ -1,7 +1,9 @@
 'use client';
 
 import { motion, AnimatePresence } from 'framer-motion';
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
+import { useGalleryStorageSync } from '@/hooks/useGalleryStorageSync';
+import type { Fact } from '@/types/fact';
 
 interface GalleryImage {
   url: string;
@@ -19,9 +21,41 @@ interface ImageGalleryProps {
   isLoading: boolean;
   error: string | null;
   title: string;
+  fact?: Fact; // Add fact for storage sync
 }
 
-export function ImageGallery({ isOpen, onClose, images, isLoading, error, title }: ImageGalleryProps) {
+export function ImageGallery({ 
+  isOpen, 
+  onClose, 
+  images, 
+  isLoading, 
+  error, 
+  title,
+  fact 
+}: ImageGalleryProps) {
+  const imageRefs = useRef<Map<string, HTMLImageElement>>(new Map());
+  
+  // Storage sync hook - only enabled when gallery is open and fact is provided
+  const {
+    isSyncing,
+    syncProgress,
+    loadedCount,
+    totalCount,
+    allLoaded,
+    registerImageElement,
+  } = useGalleryStorageSync({
+    fact: fact!,
+    images,
+    isLoading,
+    enabled: isOpen && !!fact && images.length > 0,
+    onSyncComplete: (synced) => {
+      console.log(`Synced ${synced} images to storage`);
+    },
+    onSyncError: (error) => {
+      console.error('Storage sync error:', error);
+    },
+  });
+
   // Lock body scroll when open
   useEffect(() => {
     if (isOpen) {
@@ -73,12 +107,33 @@ export function ImageGallery({ isOpen, onClose, images, isLoading, error, title 
           >
             {/* Header */}
             <div className="flex items-center justify-between p-4 border-b border-gray-200 dark:border-gray-800 bg-white/50 dark:bg-black/50 backdrop-blur-sm z-10">
-              <h2 className="text-lg font-semibold text-gray-900 dark:text-white truncate pr-4">
-                Images: {title}
-              </h2>
+              <div className="flex-1 min-w-0">
+                <h2 className="text-lg font-semibold text-gray-900 dark:text-white truncate pr-4">
+                  Images: {title}
+                </h2>
+                {/* Storage sync status */}
+                {fact && (
+                  <div className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                    {isSyncing ? (
+                      <span className="flex items-center gap-2">
+                        <span className="inline-block w-2 h-2 bg-blue-500 rounded-full animate-pulse" />
+                        Syncing to storage... {Math.round(syncProgress)}%
+                      </span>
+                    ) : allLoaded ? (
+                      <span className="text-green-600 dark:text-green-400">
+                        ✓ All images loaded ({loadedCount}/{totalCount})
+                      </span>
+                    ) : (
+                      <span>
+                        Loading images... ({loadedCount}/{totalCount})
+                      </span>
+                    )}
+                  </div>
+                )}
+              </div>
               <button
                 onClick={onClose}
-                className="p-2 rounded-full hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+                className="p-2 rounded-full hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors flex-shrink-0"
                 aria-label="Close gallery"
               >
                 <svg className="w-6 h-6 text-gray-500 dark:text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -119,6 +174,15 @@ export function ImageGallery({ isOpen, onClose, images, isLoading, error, title 
                       onClick={() => window.open(img.url, '_blank')}
                     >
                       <img 
+                        ref={(el) => {
+                          if (el) {
+                            imageRefs.current.set(img.url, el);
+                            registerImageElement(img.url, el);
+                          } else {
+                            imageRefs.current.delete(img.url);
+                            registerImageElement(img.url, null);
+                          }
+                        }}
                         src={img.thumbnailUrl} 
                         alt={img.alt}
                         loading="lazy"
@@ -140,6 +204,16 @@ export function ImageGallery({ isOpen, onClose, images, isLoading, error, title 
             {!isLoading && !error && images.length > 0 && (
                 <div className="p-4 bg-gray-50 dark:bg-gray-800/50 border-t border-gray-200 dark:border-gray-800 text-center text-xs text-gray-500">
                     Showing {images.length} top results
+                    {isSyncing && (
+                      <div className="mt-2">
+                        <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-1.5">
+                          <div 
+                            className="bg-blue-600 h-1.5 rounded-full transition-all duration-300"
+                            style={{ width: `${syncProgress}%` }}
+                          />
+                        </div>
+                      </div>
+                    )}
                 </div>
             )}
           </motion.div>

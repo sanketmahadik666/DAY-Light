@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, memo, useCallback } from 'react';
+import { useState, memo, useCallback, useEffect, useRef } from 'react';
 import { motion } from 'framer-motion';
 import type { Fact } from '@/types/fact';
 import { ImageLayer } from './ImageLayer';
@@ -8,6 +8,7 @@ import { FactOverlay } from './FactOverlay';
 import { ImageGallery } from './ImageGallery';
 import { useImageForFact } from '@/hooks/useImageForFact';
 import { useFactImages } from '@/hooks/useFactImages';
+import { useFactViewTracking } from '@/lib/services/analytics-collector';
 
 interface FactSlideProps {
   fact: Fact;
@@ -38,8 +39,26 @@ export const FactSlide = memo(function FactSlide({
     isOpen: isGalleryOpen, 
     setIsOpen: setGalleryOpen 
   } = useFactImages(fact, shouldPreloadGallery);
+  
+  // Analytics tracking
+  const trackFactView = useFactViewTracking();
+  const endViewTrackingRef = useRef<(() => void) | null>(null);
 
   const imageUrl = hiResUrl || fallbackIcon;
+
+  // Track fact view when slide becomes active
+  useEffect(() => {
+    if (isActive) {
+      const endTracking = trackFactView(fact.id, fact.date, fact.category, index);
+      endViewTrackingRef.current = endTracking;
+      
+      return () => {
+        if (endViewTrackingRef.current) {
+          endViewTrackingRef.current();
+        }
+      };
+    }
+  }, [isActive, fact, index, trackFactView]);
 
   const handleGalleryOpen = useCallback(() => {
     setGalleryOpen(true);
@@ -86,6 +105,7 @@ export const FactSlide = memo(function FactSlide({
           isLoading={galleryLoading}
           error={galleryError}
           title={fact.title || fact.category}
+          fact={fact}
         />
       )}
     </motion.div>
