@@ -11,6 +11,38 @@ A cinematic, offline-capable, date-based fact gallery with reliable caching, str
   - Debounced input validation for smoother interactions.
   - Zero layout thrashing during scroll via cached metrics.
 
+## Features
+
+- 🎨 **Dual View Modes**: Switch seamlessly between **Cinematic Slides** (Snap-scroll) and **Masonry Grid** (Exploratory).
+- 📱 **Offline-First**: IndexedDB + Service Worker caching with multi-layer fallbacks.
+- 🖼️ **Progressive Image Loading**: LQIP → thumbnail → hi-res with instant fallbacks.
+- ⚡ **Performance Optimized**: LCP < 2.5s, smooth scrolling, zero jank.
+- ♿ **Accessible**: WCAG AA compliant with reduced-motion support and proper ARIA management.
+- 🎯 **Smart Image Engine**: Multi-source image fetching with intelligent scoring.
+
+## Getting Started
+
+### Installation
+
+```bash
+npm install
+```
+
+### Development
+
+```bash
+npm run dev
+```
+
+Open [http://localhost:3000](http://localhost:3000) in your browser.
+
+### Build
+
+```bash
+npm run build
+npm start
+```
+
 ## Interesting Techniques
 
 The codebase employs several advanced web techniques for performance and user experience:
@@ -52,154 +84,159 @@ The codebase employs several advanced web techniques for performance and user ex
 
 ### Core Framework
 
-- **[Next.js 14](https://nextjs.org/)** - React framework with App Router, Server Components, and optimized image handling
-- **[React 18.3](https://react.dev/)** - UI library with concurrent features and automatic batching
-- **[TypeScript 5.3](https://www.typescriptlang.org/)** - Type-safe JavaScript with strict mode
+- [**Next.js 14**](https://nextjs.org/) - React framework with App Router, Server Components, and optimized image handling
+- [**React 18.3**](https://react.dev/) - UI library with concurrent features and automatic batching
+- [**TypeScript 5.3**](https://www.typescriptlang.org/) - Type-safe JavaScript with strict mode
 
 ### Styling & Animation
 
-- **[Tailwind CSS 3.4](https://tailwindcss.com/)** - Utility-first CSS framework with custom theme extensions
-- **[Framer Motion 11](https://www.framer.com/motion/)** - Production-ready motion library for React with layout animations
-- **[PostCSS](https://postcss.org/)** - CSS transformation tool
-- **[Autoprefixer](https://github.com/postcss/autoprefixer)** - Automatic vendor prefixing
+- [**Tailwind CSS 3.4**](https://tailwindcss.com/) - Utility-first CSS framework with custom theme extensions
+- [**Framer Motion 11**](https://www.framer.com/motion/) - Production-ready motion library for React with layout animations
+- [**PostCSS**](https://postcss.org/) - CSS transformation tool
+- [**Autoprefixer**](https://github.com/postcss/autoprefixer) - Automatic vendor prefixing
 
 ### Data & Caching
 
-- **[idb 8.0](https://github.com/jakearchibald/idb)** - A tiny wrapper around IndexedDB that makes it more pleasant to use
-- **[pako 2.1](https://github.com/nodeca/pako)** - High-speed zlib port to JavaScript for data compression in IndexedDB
+- [**idb 8.0**](https://github.com/jakearchibald/idb) - A tiny wrapper around IndexedDB that makes it more pleasant to use
+- [**pako 2.1**](https://github.com/nodeca/pako) - High-speed zlib port to JavaScript for data compression in IndexedDB
 - **Service Worker** - Native browser API for offline support and runtime caching
 
 ### Data Validation & Utilities
 
-- **[Zod 3.22](https://zod.dev/)** - TypeScript-first schema validation library used in [lib/validators.ts](lib/validators.ts)
-- **[date-fns 3.3](https://date-fns.org/)** - Modern JavaScript date utility library for date parsing and formatting
+- [**Zod 3.22**](https://zod.dev/) - TypeScript-first schema validation library used in [lib/validators.ts](lib/validators.ts)
+- [**date-fns 3.3**](https://date-fns.org/) - Modern JavaScript date utility library for date parsing and formatting
 
 ### Testing
 
-- **[Jest 30](https://jestjs.io/)** - JavaScript testing framework
-- **[React Testing Library 16](https://testing-library.com/react)** - Simple and complete React DOM testing utilities
-- **[MSW 2.12](https://mswjs.io/)** - API mocking library for testing
-- **[fake-indexeddb 6.2](https://github.com/dumbmatter/fakeIndexedDB)** - In-memory IndexedDB implementation for testing
+- [**Jest 30**](https://jestjs.io/) - JavaScript testing framework
+- [**React Testing Library 16**](https://testing-library.com/react) - Simple and complete React DOM testing utilities
+- [**MSW 2.12**](https://mswjs.io/) - API mocking library for testing
+- [**fake-indexeddb 6.2**](https://github.com/dumbmatter/fakeIndexedDB) - In-memory IndexedDB implementation for testing
 
 ### Fonts
 
-- **[Inter](https://fonts.google.com/specimen/Inter)** - Variable font loaded via Next.js font optimization in [app/layout.tsx](app/layout.tsx). The font is configured with `display: 'swap'` for optimal loading performance.
+- [**Inter**](https://fonts.google.com/specimen/Inter) - Variable font loaded via Next.js font optimization in [app/layout.tsx](app/layout.tsx). The font is configured with `display: 'swap'` for optimal loading performance.
 
 ## Project Structure
 
 ```
 DAY-Light/
-├── app/                          # Next.js App Router directory
-│   ├── api/                      # API routes
-│   │   ├── facts/                # Facts API endpoint
-│   │   │   └── route.ts          # Wikimedia OnThisDay API proxy
-│   │   └── normalize-facts/      # Fact normalization worker
-│   │       └── route.ts          # Data enhancement endpoint
-│   ├── globals.css               # Global styles, theme variables, reduced-motion support
-│   ├── layout.tsx                # Root layout with font loading and SW registration
-│   └── page.tsx                  # Main gallery page entry point
-│
-├── components/                   # React components
-│   ├── __tests__/                # Component unit tests
-│   ├── DateChangeModal.tsx       # Modal for date selection overlay
-│   ├── DatePicker.tsx            # Date/range picker with validation
-│   ├── FactCard.tsx              # Lightweight masonry grid card component
-│   ├── FactOverlay.tsx           # Text overlay for slides (title, description, actions)
-│   ├── FactSlide.tsx             # Full-screen immersive slide component
-│   ├── GalleryScroller.tsx       # Dual-mode container (slides/masonry) with windowed rendering
-│   ├── GalleryShell.tsx          # Top-level state manager and view orchestrator
-│   ├── ImageGallery.tsx          # Shared modal for exploring additional images
-│   ├── ImageLayer.tsx            # Progressive image loading with multi-level fallbacks
-│   ├── SWRegister.tsx            # Service Worker registration component
-│   └── WorkflowGate.tsx          # Sequential workflow execution with progress tracking
-│
-├── hooks/                        # Custom React hooks
-│   ├── __tests__/                # Hook unit tests
-│   ├── useEnhancedFacts.ts       # Enhanced facts with normalization and additional sources
-│   ├── useFactImages.ts          # Progressive image gallery loading with TTL cache
-│   ├── useFacts.ts               # Core fact loader with multi-layer fallback chain
-│   ├── useFactsRange.ts          # Batched parallel fetching for date ranges
-│   └── useImageForFact.ts        # Per-fact image loader with IndexedDB cache
-│
-├── lib/                          # Core libraries and utilities
-│   ├── __tests__/                # Library unit tests
-│   ├── apiSanitizer.ts           # API rate limiting and error handling
-│   ├── dataSources.ts            # Additional data source integrations
-│   ├── imageEngine.ts            # Multi-source image search with intelligent scoring
-│   ├── indexedCache.ts           # IndexedDB utilities with compression, TTL, LRU eviction
-│   ├── notablePeopleResolver.ts  # Person name resolution from facts
-│   ├── serviceWorker.ts          # Service Worker registration and caching strategies
-│   ├── storage.ts                # LocalStorage wrapper with type safety
-│   ├── validators.ts             # Zod-based data validation schemas
-│   └── workflowHelpers.ts        # Workflow gate creation utilities
-│
-├── public/                       # Static assets
-│   ├── fallback/                 # Fallback icons and placeholders
-│   │   ├── atom_or_rocket_icon.svg
-│   │   ├── chip_or_circuit_icon.svg
-│   │   ├── colorful_event_icon.svg
-│   │   ├── currency_icon.svg
-│   │   ├── default-placeholder.png
-│   │   ├── galaxy_placeholder.svg
-│   │   ├── landmark_icon.svg
-│   │   ├── music_or_movie_icon.svg
-│   │   ├── person_silhouette.svg
-│   │   ├── stadium_or_ball_icon.svg
-│   │   └── trophy_icon.svg
-│   ├── static-data/              # Pre-generated fact JSON files
-│   │   └── 2024-01-15.json      # Example static fact data
-│   └── sw.js                     # Service Worker script
-│
-├── types/                        # TypeScript type definitions
-│   ├── fact.ts                   # Fact, ImageMetadata, and cache entry types
-│   └── workflow.ts               # Workflow gate and execution state types
-│
-├── utils/                        # Utility functions
-│   ├── helpers.ts                # Date formatting, parsing, validation utilities
-│   └── math.ts                   # Mathematical utilities
-│
-├── Docs/                         # Project documentation
-│   ├── API_BEST_PRACTICES_IMPLEMENTATION.md
-│   ├── ARCHITECTURE_RULES.md
-│   ├── COMPONENT_COORDINATION.md
-│   ├── CUSTOM_DATES_TEST_REPORT.md
-│   ├── DATE_CHANGE_FIX.md
-│   ├── IMAGE_ENGINE_ENHANCEMENTS.md
-│   ├── RUNTIME_TEST_REPORT.md
-│   ├── SETUP.md
-│   └── TEST_REPORT.md
-│
-├── .eslintrc.json               # ESLint configuration
-├── .gitignore                    # Git ignore patterns
-├── jest.config.js                # Jest test configuration
-├── jest.setup.js                 # Jest test environment setup
-├── next.config.js                # Next.js configuration
-├── package.json                  # Dependencies and scripts
-├── postcss.config.js             # PostCSS configuration
-├── tailwind.config.js            # Tailwind CSS configuration with theme extensions
-└── tsconfig.json                 # TypeScript configuration
+├── app/
+│   ├── api/
+│   │   ├── facts/
+│   │   └── normalize-facts/
+│   ├── analytics/
+│   ├── globals.css
+│   ├── layout.tsx
+│   └── page.tsx
+├── components/
+│   ├── __tests__/
+│   └── analytics/
+├── hooks/
+│   └── __tests__/
+├── lib/
+│   ├── __tests__/
+│   └── services/
+├── public/
+│   ├── fallback/
+│   ├── static-data/
+├── types/
+├── utils/
+├── Docs/
+├── .eslintrc.json
+├── .gitignore
+├── jest.config.js
+├── jest.setup.js
+├── next.config.js
+├── package.json
+├── postcss.config.js
+├── tailwind.config.js
+└── tsconfig.json
 ```
 
 ### Directory Descriptions
 
-- **`app/`**: Next.js 14 App Router directory containing pages, layouts, and API routes. The API routes act as proxies to external services with rate limiting and error handling.
-- **`components/`**: React components organized by feature. Components use composition patterns and are optimized with memoization where appropriate.
-- **`hooks/`**: Custom React hooks encapsulating data fetching, caching, and state management logic. Hooks follow the multi-layer fallback pattern for robustness.
-- **`lib/`**: Core libraries and utilities that are framework-agnostic. Includes IndexedDB management, image search algorithms, and data validation.
-- **`public/fallback/`**: SVG and PNG fallback icons categorized by fact type. These ensure visual consistency even when external images fail to load.
-- **`public/static-data/`**: Pre-generated JSON files for specific dates, providing offline fallback when IndexedDB and API calls fail.
-- **`types/`**: Centralized TypeScript type definitions ensuring type safety across the application.
-- **`utils/`**: Pure utility functions for date manipulation, string formatting, and mathematical operations.
-- **`Docs/`**: Comprehensive documentation covering architecture decisions, testing strategies, and implementation details.
+- [**`app/`**](./app): Next.js 14 App Router directory containing pages, layouts, and API routes. The API routes act as proxies to external services with rate limiting and error handling.
+- [**`components/`**](./components): React components organized by feature. Components use composition patterns and are optimized with memoization where appropriate.
+- [**`hooks/`**](./hooks): Custom React hooks encapsulating data fetching, caching, and state management logic. Hooks follow the multi-layer fallback pattern for robustness.
+- [**`lib/`**](./lib): Core libraries and utilities that are framework-agnostic. Includes IndexedDB management, image search algorithms, and data validation.
+- [**`public/fallback/`**](./public/fallback): SVG and PNG fallback icons categorized by fact type. These ensure visual consistency even when external images fail to load.
+- [**`public/static-data/`**](./public/static-data): Pre-generated JSON files for specific dates, providing offline fallback when IndexedDB and API calls fail.
+- [**`types/`**](./types): Centralized TypeScript type definitions ensuring type safety across the application.
+- [**`utils/`**](./utils): Pure utility functions for date manipulation, string formatting, and mathematical operations.
+- [**`Docs/`**](./Docs): Comprehensive documentation covering architecture decisions, testing strategies, and implementation details.
 
-## Features
+## Caching Strategy
 
-- 🎨 **Dual View Modes**: Switch seamlessly between **Cinematic Slides** (Snap-scroll) and **Masonry Grid** (Exploratory).
-- 📱 **Offline-First**: IndexedDB + Service Worker caching with multi-layer fallbacks.
-- 🖼️ **Progressive Image Loading**: LQIP → thumbnail → hi-res with instant fallbacks.
-- ⚡ **Performance Optimized**: LCP < 2.5s, smooth scrolling, zero jank.
-- ♿ **Accessible**: WCAG AA compliant with reduced-motion support and proper ARIA management.
-- 🎯 **Smart Image Engine**: Multi-source image fetching with intelligent scoring.
+### IndexedDB
+
+- **Facts**: 24-hour TTL, keyed by date, gzip-compressed
+- **Images**: 30-day TTL, LRU eviction (max 300 entries)
+- **Meta**: Random pool, sync status, version
+
+### Service Worker
+
+- **dl-static-v1**: Static assets and fallback icons
+- **dl-json-v1**: JSON fact data
+- **dl-images-v1**: Image binaries (max 120, LRU pruning)
+
+### Fallback Chain
+
+**Facts:**
+
+1. IndexedDB (fresh, 24h TTL)
+2. SW Runtime Cache
+3. Static JSON (`/static-data/YYYY-MM-DD.json`)
+4. Minimal offline fact (title only)
+
+**Images (Tiered Pipeline):**
+
+1. **IndexedDB metadata** → return instantly if cached
+2. **Service Worker cache** (binary)
+3. **Tier 1**: Wikimedia Commons (direct API, sanitized URLs)
+4. **Tier 2**: NASA Images / APOD (Space category)
+5. **Tier 3**: Openverse Creative Commons search
+6. **Tier 4**: StaticPhotos category fallback (`https://static.photos/{mapped}/1200x630`)
+7. **Tier 5**: Local SVG fallback icon (`/fallback/{category}.svg`)
+8. **Tier 6**: Generic default placeholder (`/fallback/default-placeholder.png`)
+
+| Category   | StaticPhotos Mapping | URL Example                                 |
+| ---------- | -------------------- | ------------------------------------------- |
+| Birthdays  | `people`             | `https://static.photos/people/1200x630`     |
+| Historical | `vintage`            | `https://static.photos/vintage/1200x630`    |
+| Science    | `science`            | `https://static.photos/science/1200x630`    |
+| Finance    | `finance`            | `https://static.photos/finance/1200x630`    |
+| Sports     | `sport`              | `https://static.photos/sport/1200x630`      |
+| Festivals  | `event`              | `https://static.photos/event/1200x630`      |
+| Space      | `aerial`             | `https://static.photos/aerial/1200x630`     |
+| PopCulture | `event`              | `https://static.photos/event/1200x630`      |
+| Awards     | `event`              | `https://static.photos/event/1200x630`      |
+| Technology | `technology`         | `https://static.photos/technology/1200x630` |
+
+## Image Engine
+
+The image engine searches multiple sources and scores candidates:
+
+- **Wikimedia** (40 points) - Highest authority
+- **NASA** (35 points) - For Science/Space categories
+- **Wikidata** (25 points) - Structured data
+- **Static** (10 points) - Curated images
+- **Fallback** (0 points) - Category icons
+
+## Performance Targets
+
+- **LCP**: < 2.5s on mid-tier devices
+- **TTI**: < 3s
+- **Image Load**: < 700ms cached, < 1500ms network
+- **Scroll Jank**: 0-1ms main thread blocks
+
+## Accessibility
+
+- ARIA roles and labels
+- Keyboard navigation (arrows, space, esc)
+- Screen reader support
+- Reduced motion support (`prefers-reduced-motion`)
+- Semantic HTML
 
 ## License
 
